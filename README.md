@@ -17,7 +17,7 @@ Prises en format téléphone (Pixel 9a), avec les commandes tactiles.
   <img src="docs/screenshots/jour-grotte.jpg" width="24%" alt="La grotte, en plein jour">
 </p>
 
-<p align="center"><sub>De gauche à droite : Un éclat de lune, la nuit · Hall des racines · Cœur de la Montagne · la grotte, en plein jour</sub></p>
+<p align="center"><sub>De gauche à droite : un éclat de lune la nuit · le Hall des Racines · le Cœur de la Montagne · la grotte en plein jour</sub></p>
 
 ## Commandes
 
