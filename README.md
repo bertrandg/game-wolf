@@ -1,6 +1,6 @@
 # Le Loup des Terres Sauvages
 
-Jeu 3D isométrique dans le navigateur. Un loup explore de nuit une grande terre sauvage — clairières, forêts, six lacs et deux sommets, entourés de montagnes — à la recherche de neuf éclats de lune à rapporter au Cercle des Pierres Anciennes. Cerfs, chevaux, renards et une soixantaine d'autres animaux y vivent et fuient quand le loup hurle.
+Jeu 3D isométrique dans le navigateur. Un loup explore une grande terre sauvage — clairières, forêts, six lacs et deux sommets, entourés de montagnes. La nuit, il cherche sept éclats de lune à rapporter au Cercle des Pierres Anciennes : le monde bascule alors en plein jour, couleurs éclatantes et chants d'oiseaux. Sept cristaux de soleil permettent ensuite de rappeler la nuit, et le cycle recommence avec de nouveaux cristaux. Cerfs, chevaux, renards et une soixantaine d'autres animaux y vivent et fuient quand le loup hurle.
 
 **Jouer en ligne :** https://bertrandg.github.io/game-wolf/
 
@@ -22,7 +22,8 @@ Sur mobile, des boutons tactiles s'affichent à l'écran.
 - Le jeu tient dans `index.html`, sans étape de build. Les modèles 3D sont dans `assets/`.
 - [Three.js](https://threejs.org/) 0.160.0 chargé depuis jsDelivr (bloom, chargement glTF, clonage des squelettes).
 - Monde généré procéduralement (bruit de Perlin, graine fixe) sur environ 720 × 720 unités.
-- Sons synthétisés avec la Web Audio API, aucun fichier audio.
+- Sons synthétisés avec la Web Audio API, aucun fichier audio : vent et nappe grave la nuit, accord chaud, brise et oiseaux le jour.
+- Bascule jour / nuit : chaque sommet du terrain porte une couleur de nuit et une de jour, mélangées dans le shader ; lumières, brouillard, eau, végétation et particules suivent le même curseur.
 - Loup et animaux : pack *Ultimate Animated Animals* de [Quaternius](https://quaternius.com/), licence CC0. Les modèles ont été convertis en GLB compressé avec [glTF Transform](https://gltf-transform.dev/) (quantification, animations inutilisées retirées) : environ 330 Ko par animal au lieu de 3 Mo.
 
 ### Performances

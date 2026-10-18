@@ -15,6 +15,8 @@
   --mist: #8b91ab;
   --spirit: #8ff3ff;
   --rune: #b48cff;
+  --sun: #ffd27a;
+  --ember: #ffb347;
   --panel: rgba(10, 12, 24, 0.62);
   --line: rgba(143, 243, 255, 0.22);
   --display: "Cinzel", "Trajan Pro", "Times New Roman", serif;
@@ -39,6 +41,17 @@ body {
   background: radial-gradient(ellipse at 50% 55%, transparent 45%, rgba(3, 3, 10, 0.55) 80%, rgba(2, 2, 6, 0.9) 100%);
 }
 .hud { position: fixed; pointer-events: none; z-index: 2; }
+#sunglare {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 5s; mix-blend-mode: screen;
+  background: radial-gradient(circle at 88% 6%, rgba(255, 236, 180, 0.55), rgba(255, 196, 110, 0.18) 28%, transparent 60%);
+}
+body.day #sunglare { opacity: 1; }
+#flash { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
+.vignette { transition: opacity 5s; }
+body.day .vignette { opacity: 0.3; }
+body.day .hud, body.day .toast { text-shadow: 0 1px 2px rgba(20, 14, 4, 0.85), 0 0 18px rgba(60, 35, 0, 0.45); }
+body.day .hud-title .zone, body.day .toast small { color: var(--sun); }
+body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--ember); }
 .hud-title {
   top: calc(18px + env(safe-area-inset-top, 0px));
   left: max(20px, env(safe-area-inset-left, 0px));
@@ -171,6 +184,8 @@ body {
 
 <div id="scene"></div>
 <div class="vignette"></div>
+<div id="flash"></div>
+<div id="sunglare"></div>
 
 <div class="hud hud-title">
   <h1>Terres Sauvages</h1>
@@ -178,7 +193,7 @@ body {
 </div>
 <div class="hud hud-map"><canvas id="map" width="336" height="336"></canvas></div>
 <div class="hud hud-shards">
-  <div class="label">Éclats de lune</div>
+  <div class="label" id="shardLabel">Éclats de lune</div>
   <div class="row" id="shards"></div>
 </div>
 <div class="hud hud-help" id="help">
@@ -205,7 +220,7 @@ body {
   <div class="intro-card">
     <div class="intro-moon"></div>
     <h2>Le Loup des Terres Sauvages</h2>
-    <p>La lune s'est brisée au-dessus des clairières. Ses <em>neuf éclats</em> sont tombés entre forêts, lacs et montagnes. Rapporte leur lumière au Cercle des Pierres Anciennes.</p>
+    <p>La lune s'est brisée au-dessus des clairières. Ses <em>sept éclats</em> sont tombés entre forêts, lacs et montagnes. Rapporte leur lumière au Cercle des Pierres Anciennes.</p>
     <div class="controls">
       <kbd>Z Q S D · flèches</kbd><span>se déplacer</span>
       <kbd>Espace</kbd><span>sauter</span>
@@ -319,8 +334,9 @@ function fitCamera() {
 }
 fitCamera();
 
-scene.add(new THREE.HemisphereLight(0x3a3a78, 0x0a0f0c, 1.35));
-scene.add(new THREE.AmbientLight(0x1a1c33, 0.6));
+const hemi = new THREE.HemisphereLight(0x3a3a78, 0x0a0f0c, 1.35);
+const amb = new THREE.AmbientLight(0x1a1c33, 0.6);
+scene.add(hemi, amb);
 const moon = new THREE.DirectionalLight(0xa9bcff, 1.6);
 moon.castShadow = true;
 moon.shadow.mapSize.set(2048, 2048);
@@ -329,6 +345,7 @@ moon.shadow.bias = -0.0006;
 moon.shadow.normalBias = 0.04;
 scene.add(moon, moon.target);
 const moonOffset = new THREE.Vector3(-45, 70, -10);
+const NIGHT_LIGHT_OFFSET = moonOffset.clone(), DAY_LIGHT_OFFSET = new THREE.Vector3(35, 90, 25);
 const aura = new THREE.PointLight(0x7fa8ff, 18, 28, 1.2);
 scene.add(aura);
 
@@ -346,39 +363,49 @@ function groundH(x, z) {
   const h00 = HGRID[k], h10 = HGRID[k + 1], h01 = HGRID[k + N + 1], h11 = HGRID[k + N + 2];
   return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
 }
+// Chaque sommet porte une couleur de nuit et une couleur de jour ; uDay (0 → 1) passe de l'une à l'autre dans le shader.
+const terrainUniforms = { uDay: { value: 0 } };
+const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
+terrainMat.onBeforeCompile = sh => {
+  sh.uniforms.uDay = terrainUniforms.uDay;
+  sh.vertexShader = 'attribute vec3 colorDay;\nuniform float uDay;\n' + sh.vertexShader.replace('#include <color_vertex>', 'vColor = mix(color, colorDay, uDay);');
+};
 // Le terrain est découpé en 12 × 12 blocs : seuls ceux dans le champ de la caméra sont dessinés.
 {
-  const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
-  const C = {
-    deep: new THREE.Color(0x0e1418), mud: new THREE.Color(0x34332a), clear: new THREE.Color(0x3d5036),
-    forest: new THREE.Color(0x1c2a22), heather: new THREE.Color(0x4a3656), rock: new THREE.Color(0x4b4a58),
-    rock2: new THREE.Color(0x37363f), snow: new THREE.Color(0xaab3cb), moss: new THREE.Color(0x2d4a40),
-  };
+  const palette = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, new THREE.Color(v)]));
+  const NIGHT_C = palette({ deep: 0x0e1418, mud: 0x34332a, clear: 0x3d5036, forest: 0x1c2a22, heather: 0x4a3656, rock: 0x4b4a58, rock2: 0x37363f, snow: 0xaab3cb, moss: 0x2d4a40 });
+  const DAY_C = palette({ deep: 0x2b6f7a, mud: 0xc2a46a, clear: 0x7fc44a, forest: 0x3e8a35, heather: 0xb99ac6, rock: 0xa49d90, rock2: 0x837c70, snow: 0xffffff, moss: 0x62a040 });
   const c = new THREE.Color(), tmp = new THREE.Color();
-  let p, cols, o;
+  let p, cols, colsDay, o;
+  // Même recette de couleur pour la nuit et le jour, avec les mêmes tirages aléatoires : seule la palette change.
+  function faceColor(C, out, my, ny, fd, hn, r1, r2, r3) {
+    if (my < -0.3) out.copy(C.deep).lerp(C.mud, smooth(-3, -0.3, my));
+    else if (my < 0.55) out.copy(C.mud).lerp(C.moss, r1 * 0.4);
+    else {
+      out.copy(C.clear).lerp(C.forest, smooth(-0.08, 0.16, fd));
+      if (hn > 0.12) out.lerp(C.heather, smooth(0.12, 0.28, hn) * 0.75);
+      const rk = Math.max(smooth(5.5, 10, my), smooth(0.82, 0.62, ny));
+      if (rk > 0) { tmp.copy(C.rock).lerp(C.rock2, r2); out.lerp(tmp, rk); }
+      if (my > 19) out.lerp(C.snow, smooth(19, 30, my) * smooth(0.45, 0.8, ny));
+    }
+    return out.multiplyScalar(r3);
+  }
   function tri(ax, ay, az, bx, by, bz, cx, cy, cz) {
     p.set([ax, ay, az, bx, by, bz, cx, cy, cz], o);
     const mx = (ax + bx + cx) / 3, my = (ay + by + cy) / 3, mz = (az + bz + cz) / 3;
     const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
     const nx = uy * vz - uz * vy, ny0 = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const ny = Math.abs(ny0 / Math.hypot(nx, ny0, nz));
-    if (my < -0.3) c.copy(C.deep).lerp(C.mud, smooth(-3, -0.3, my));
-    else if (my < 0.55) c.copy(C.mud).lerp(C.moss, rand() * 0.4);
-    else {
-      const fd = FD(mx, mz);
-      c.copy(C.clear).lerp(C.forest, smooth(-0.08, 0.16, fd));
-      const hn = fbm(mx * 0.03 + 50, mz * 0.03 + 50, 2);
-      if (hn > 0.12) c.lerp(C.heather, smooth(0.12, 0.28, hn) * 0.75);
-      const rk = Math.max(smooth(5.5, 10, my), smooth(0.82, 0.62, ny));
-      if (rk > 0) { tmp.copy(C.rock).lerp(C.rock2, rand()); c.lerp(tmp, rk); }
-      if (my > 19) c.lerp(C.snow, smooth(19, 30, my) * smooth(0.45, 0.8, ny));
+    const fd = my >= 0.55 ? FD(mx, mz) : 0, hn = my >= 0.55 ? fbm(mx * 0.03 + 50, mz * 0.03 + 50, 2) : 0;
+    const r1 = rand(), r2 = rand(), r3 = 0.9 + rand() * 0.18;
+    for (const [C, arr] of [[NIGHT_C, cols], [DAY_C, colsDay]]) {
+      faceColor(C, c, my, ny, fd, hn, r1, r2, r3);
+      for (let k = 0; k < 3; k++) { arr[o + k * 3] = c.r; arr[o + k * 3 + 1] = c.g; arr[o + k * 3 + 2] = c.b; }
     }
-    c.multiplyScalar(0.9 + rand() * 0.18);
-    for (let k = 0; k < 3; k++) { cols[o + k * 3] = c.r; cols[o + k * 3 + 1] = c.g; cols[o + k * 3 + 2] = c.b; }
     o += 9;
   }
   for (let cj = 0; cj < NCH; cj++) for (let ci = 0; ci < NCH; ci++) {
-    p = new Float32Array(CSEG * CSEG * 18); cols = new Float32Array(CSEG * CSEG * 18); o = 0;
+    p = new Float32Array(CSEG * CSEG * 18); cols = new Float32Array(CSEG * CSEG * 18); colsDay = new Float32Array(CSEG * CSEG * 18); o = 0;
     for (let j = cj * CSEG; j < (cj + 1) * CSEG; j++) for (let i = ci * CSEG; i < (ci + 1) * CSEG; i++) {
       const x0 = -SIZE / 2 + i * STEP, z0 = -SIZE / 2 + j * STEP, x1 = x0 + STEP, z1 = z0 + STEP, k = j * (N + 1) + i;
       const h00 = HGRID[k], h10 = HGRID[k + 1], h01 = HGRID[k + N + 1], h11 = HGRID[k + N + 2];
@@ -388,6 +415,7 @@ function groundH(x, z) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(p, 3));
     g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    g.setAttribute('colorDay', new THREE.BufferAttribute(colsDay, 3));
     g.computeVertexNormals();
     g.computeBoundingSphere();
     const m = new THREE.Mesh(g, terrainMat);
@@ -451,6 +479,13 @@ function hitObs(x, z, y, rad) {
   return false;
 }
 
+/* ---------- Végétation et rochers ---------- */
+// Matériaux partagés et nommés : l'ambiance jour/nuit change leur teinte d'un coup pour tout le monde.
+const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 });
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2b221d, flatShading: true, roughness: 1 });
+const deadMat = new THREE.MeshStandardMaterial({ color: 0x77707d, flatShading: true, roughness: 1 });
+const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.95 });
+const mushMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
 /* ---------- Pins ---------- */
 const dummy = new THREE.Object3D();
 {
@@ -477,8 +512,8 @@ const dummy = new THREE.Object3D();
     pts.push({ x, z, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(0.42 + rand() * 0.12, 0.25 + rand() * 0.15, 0.09 + rand() * 0.06) });
     addObs(x, z, 0.32 * s, h + 30);
   }
-  addChunkedInstances(foliage, new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 }), pts, { cast: true, receive: true, color: true });
-  addChunkedInstances(trunk, new THREE.MeshStandardMaterial({ color: 0x2b221d, flatShading: true, roughness: 1 }), pts, { cast: true });
+  addChunkedInstances(foliage, foliageMat, pts, { cast: true, receive: true, color: true });
+  addChunkedInstances(trunk, trunkMat, pts, { cast: true });
 }
 
 /* ---------- Arbres morts ---------- */
@@ -503,7 +538,7 @@ const dummy = new THREE.Object3D();
     pts.push({ x, z, m: dummy.matrix.clone() });
     addObs(x, z, 0.28, h + 30);
   }
-  addChunkedInstances(geo, new THREE.MeshStandardMaterial({ color: 0x77707d, flatShading: true, roughness: 1 }), pts, { cast: true });
+  addChunkedInstances(geo, deadMat, pts, { cast: true });
 }
 
 /* ---------- Rochers ---------- */
@@ -523,7 +558,7 @@ const dummy = new THREE.Object3D();
     pts.push({ x, z, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(0.68, 0.06, 0.2 + rand() * 0.1) });
     if (s > 0.55) addObs(x, z, s * 0.85, h + s * 0.9);
   }
-  addChunkedInstances(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.95 }), pts, { cast: true, receive: true, color: true });
+  addChunkedInstances(new THREE.IcosahedronGeometry(1, 0), rockMat, pts, { cast: true, receive: true, color: true });
 }
 
 /* ---------- Champignons luminescents ---------- */
@@ -542,15 +577,15 @@ const dummy = new THREE.Object3D();
       pts.push({ x: px, z: pz, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(hue + (rand() - 0.5) * 0.05, 1, 0.55).multiplyScalar(1.6) });
     }
   }
-  addChunkedInstances(cap, new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), pts, { color: true });
+  addChunkedInstances(cap, mushMat, pts, { color: true });
 }
 
 /* ---------- Cercle des Pierres Anciennes ---------- */
 const runeMat = new THREE.MeshBasicMaterial({ color: 0x1b4a5c, toneMapped: false });
 const ringMat = new THREE.MeshBasicMaterial({ color: 0x1b4a5c, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
 const circleGroup = new THREE.Group();
+const stoneMat = new THREE.MeshStandardMaterial({ color: 0x2f2e3a, flatShading: true, roughness: 0.95 });
 {
-  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x2f2e3a, flatShading: true, roughness: 0.95 });
   const n = 7;
   for (let i = 0; i < n; i++) {
     const a = i / n * Math.PI * 2, x = Math.cos(a) * CIRCLE_R, z = Math.sin(a) * CIRCLE_R, h = groundH(x, z);
@@ -627,15 +662,15 @@ wispGeo.setAttribute('position', new THREE.BufferAttribute(wispPos, 3));
 wispGeo.setAttribute('phase', new THREE.BufferAttribute(wispPhase, 1));
 wispGeo.setAttribute('color', new THREE.BufferAttribute(wispCol, 3));
 const wispMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: { value: 0 }, uSize: { value: 9 * renderer.getPixelRatio() }, uMap: { value: glow } },
+  uniforms: { uTime: { value: 0 }, uDay: { value: 0 }, uSize: { value: 9 * renderer.getPixelRatio() }, uMap: { value: glow } },
   vertexShader: `
     attribute float phase; attribute vec3 color; varying vec3 vColor;
-    uniform float uTime, uSize;
+    uniform float uTime, uSize, uDay;
     void main() {
       vec3 p = position + vec3(sin(uTime * 0.3 + phase) * 2.2, sin(uTime * 0.9 + phase * 2.0) * 0.6, cos(uTime * 0.25 + phase) * 2.2);
-      vColor = color;
+      vColor = mix(color, vec3(1.0, 0.86, 0.45), uDay); // le jour, les feux follets deviennent des poussières dorées
       gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-      gl_PointSize = uSize;
+      gl_PointSize = uSize * (1.0 - 0.45 * uDay);
     }`,
   fragmentShader: `
     uniform sampler2D uMap; varying vec3 vColor;
@@ -652,24 +687,34 @@ const ashPos = new Float32Array(ASH_N * 3);
 for (let i = 0; i < ASH_N; i++) ashPos.set([(rand() - 0.5) * ASH_BOX, rand() * 30, (rand() - 0.5) * ASH_BOX], i * 3);
 const ashGeo = new THREE.BufferGeometry();
 ashGeo.setAttribute('position', new THREE.BufferAttribute(ashPos, 3));
-const ash = new THREE.Points(ashGeo, new THREE.PointsMaterial({ size: 2.2, sizeAttenuation: false, color: 0x9aa2c2, transparent: true, opacity: 0.55, depthWrite: false, map: glow }));
+const ashMat = new THREE.PointsMaterial({ size: 2.2, sizeAttenuation: false, color: 0x9aa2c2, transparent: true, opacity: 0.55, depthWrite: false, map: glow });
+const ash = new THREE.Points(ashGeo, ashMat);
 ash.frustumCulled = false;
 scene.add(ash);
 
 /* ---------- Brume au sol ---------- */
+const mistMat = new THREE.SpriteMaterial({ map: glow, color: 0x7d88b8, transparent: true, opacity: 0.09, depthWrite: false });
 {
-  const mat = new THREE.SpriteMaterial({ map: glow, color: 0x7d88b8, transparent: true, opacity: 0.09, depthWrite: false });
   let n = 0;
   for (let i = 0; i < 9000 && n < 220; i++) {
     const x = (rand() * 2 - 1) * R * 0.85, z = (rand() * 2 - 1) * R * 0.85, h = groundH(x, z);
     if (h > 1.4) continue;
-    const s = new THREE.Sprite(mat); s.position.set(x, Math.max(h, 0) + 1.2, z); s.scale.setScalar(14 + rand() * 14);
+    const s = new THREE.Sprite(mistMat); s.position.set(x, Math.max(h, 0) + 1.2, z); s.scale.setScalar(14 + rand() * 14);
     scene.add(s); n++;
   }
 }
 
-/* ---------- Éclats de lune ---------- */
-const SHARD_TARGETS = [[-52, 132], [150, 50], [36, -60], [-170, 0], [-90, -140], [55, 170], [70, -180], [-60, -35], [80, 130]];
+/* ---------- Cristaux : éclats de lune la nuit, cristaux de soleil le jour ---------- */
+const CRYSTAL_N = 7;
+let awakened = false, isDay = false, cycle = 0;
+const MOON_TARGETS = [[-52, 132], [150, 50], [36, -60], [-170, 0], [-90, -140], [55, 170], [70, -180]];
+const KINDS = {
+  moon: { core: 0xd8f0ff, beam: 0x86b4ff, halo: 0x9fd8ff, ring: 0x5fa8ff, burst: 0xbfe6ff, label: 'Éclats de lune', name: 'Éclat de lune',
+    geo: new THREE.OctahedronGeometry(0.55, 0), stretch: 1.75 },
+  sun: { core: 0xfff1b8, beam: 0xffc45a, halo: 0xffd27a, ring: 0xffb347, burst: 0xffe08a, label: 'Cristaux de soleil', name: 'Cristal de soleil',
+    geo: new THREE.IcosahedronGeometry(0.6, 0), stretch: 1.1 },
+};
+const crand = mulberry32(4242);
 function findSpot(tx, tz) {
   for (let rad = 0; rad < 45; rad += 1.5) for (let a = 0; a < 6.28; a += 0.35) {
     const x = tx + Math.cos(a) * rad, z = tz + Math.sin(a) * rad, h = groundH(x, z);
@@ -677,22 +722,37 @@ function findSpot(tx, tz) {
   }
   return { x: tx, z: tz, h: groundH(tx, tz) };
 }
-const shardGeo = new THREE.OctahedronGeometry(0.55, 0);
-const shardMat = new THREE.MeshBasicMaterial({ color: 0xd8f0ff, toneMapped: false });
-const beamMat = new THREE.MeshBasicMaterial({ color: 0x86b4ff, transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
-const shards = SHARD_TARGETS.map(([tx, tz], i) => {
-  const s = findSpot(tx, tz);
-  const g = new THREE.Group(); g.position.set(s.x, s.h, s.z);
-  const core = new THREE.Mesh(shardGeo, shardMat); core.scale.set(0.8, 1.4, 0.8); core.position.y = 1.6;
-  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.7, 70, 10, 1, true), beamMat); beam.position.y = 35;
-  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: 0x9fd8ff, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false }));
-  halo.scale.setScalar(4); halo.position.y = 1.6;
-  const gr = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.1, 32).rotateX(-Math.PI / 2), ringMat.clone());
-  gr.material.color.set(0x5fa8ff); gr.position.y = 0.06;
-  g.add(core, beam, halo, gr);
-  scene.add(g);
-  return { g, core, halo, x: s.x, z: s.z, h: s.h, taken: false, phase: i * 1.3 };
-});
+// Le premier jeu d'éclats est fixe ; ensuite, chaque cycle répartit 7 cristaux tout autour du Cercle.
+function crystalTargets(kind, cycle) {
+  if (kind === 'moon' && cycle === 0) return MOON_TARGETS;
+  const off = crand() * 6.28;
+  return Array.from({ length: CRYSTAL_N }, (_, i) => {
+    const a = off + i / CRYSTAL_N * 6.28 + (crand() - 0.5) * 0.5, r = 60 + crand() * 110;
+    return [Math.cos(a) * r, Math.sin(a) * r];
+  });
+}
+const beamGeo = new THREE.CylinderGeometry(0.35, 0.7, 70, 10, 1, true);
+let shards = [];
+function spawnCrystals(kind, cycle) {
+  for (const s of shards) if (!s.taken) scene.remove(s.g);
+  const K = KINDS[kind];
+  const coreMat = new THREE.MeshBasicMaterial({ color: K.core, toneMapped: false });
+  const bMat = new THREE.MeshBasicMaterial({ color: K.beam, transparent: true, opacity: kind === 'sun' ? 0.2 : 0.13, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
+  const hMat = new THREE.SpriteMaterial({ map: glow, color: K.halo, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false });
+  const rMat = new THREE.MeshBasicMaterial({ color: K.ring, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  shards = crystalTargets(kind, cycle).map(([tx, tz], i) => {
+    const s = findSpot(tx, tz);
+    const g = new THREE.Group(); g.position.set(s.x, s.h, s.z);
+    const core = new THREE.Mesh(K.geo, coreMat); core.scale.set(0.8, 0.8 * K.stretch, 0.8); core.position.y = 1.6;
+    const beam = new THREE.Mesh(beamGeo, bMat); beam.position.y = 35;
+    const halo = new THREE.Sprite(hMat.clone()); halo.scale.setScalar(4); halo.position.y = 1.6;
+    const gr = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.1, 32).rotateX(-Math.PI / 2), rMat); gr.position.y = 0.06;
+    g.add(core, beam, halo, gr);
+    scene.add(g);
+    return { g, core, halo, x: s.x, z: s.z, h: s.h, taken: false, phase: i * 1.3 };
+  });
+}
+spawnCrystals('moon', 0);
 
 /* ---------- Le loup ---------- */
 function makeWolf() {
@@ -953,11 +1013,11 @@ function updateAnimals(dt) {
 
 /* ---------- Effets ---------- */
 const effects = [];
-function burst(x, y, z, color, n = 70) {
+function burst(x, y, z, color, n = 70, speed = 1) {
   const pos = new Float32Array(n * 3), vel = [];
   for (let i = 0; i < n; i++) {
     pos.set([x, y, z], i * 3);
-    const a = rand() * 6.28, u = rand() * 2 - 1, s = 3 + rand() * 7;
+    const a = rand() * 6.28, u = rand() * 2 - 1, s = (3 + rand() * 7) * speed;
     vel.push([Math.cos(a) * Math.sqrt(1 - u * u) * s, Math.abs(u) * s + 2, Math.sin(a) * Math.sqrt(1 - u * u) * s]);
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -975,21 +1035,82 @@ function shockRing(x, y, z, color, maxR = 14, life = 1.8) {
 }
 
 /* ---------- Audio (synthétisé) ---------- */
-let actx = null, master = null, muted = false;
+let actx = null, master = null, nightBus = null, dayBus = null, muted = false;
 function initAudio() {
   if (actx) return;
   try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
   master = actx.createGain(); master.gain.value = 0.55; master.connect(actx.destination);
+  // Deux ambiances qui se croisent pendant la bascule : vent et nappe grave la nuit, nappe chaude et oiseaux le jour.
+  nightBus = actx.createGain(); nightBus.gain.value = isDay ? 0 : 1; nightBus.connect(master);
+  dayBus = actx.createGain(); dayBus.gain.value = isDay ? 1 : 0; dayBus.connect(master);
   const len = actx.sampleRate * 4, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
   let last = 0; for (let i = 0; i < len; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
   const wind = actx.createBufferSource(); wind.buffer = buf; wind.loop = true;
   const wf = actx.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 500; wf.Q.value = 2;
   const lfo = actx.createOscillator(); lfo.frequency.value = 0.07; const lg = actx.createGain(); lg.gain.value = 300; lfo.connect(lg).connect(wf.frequency);
   const wg = actx.createGain(); wg.gain.value = 0.35;
-  wind.connect(wf).connect(wg).connect(master); wind.start(); lfo.start();
-  const pad = actx.createGain(); pad.gain.value = 0.035; pad.connect(master);
+  wind.connect(wf).connect(wg).connect(nightBus); wind.start(); lfo.start();
+  const pad = actx.createGain(); pad.gain.value = 0.035; pad.connect(nightBus);
   for (const f of [55, 82.4, 110.6, 164.8]) { const o = actx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 12; o.connect(pad); o.start(); }
   const trem = actx.createOscillator(); trem.frequency.value = 0.11; const tg = actx.createGain(); tg.gain.value = 0.02; trem.connect(tg).connect(pad.gain); trem.start();
+  // Jour : accord majeur doux et brise légère.
+  const warm = actx.createGain(); warm.gain.value = 0.022;
+  const wlp = actx.createBiquadFilter(); wlp.type = 'lowpass'; wlp.frequency.value = 1600;
+  warm.connect(wlp).connect(dayBus);
+  for (const f of [196, 246.9, 293.7, 392, 493.9]) { const o = actx.createOscillator(); o.type = 'triangle'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 10; o.connect(warm); o.start(); }
+  const shimmer = actx.createOscillator(); shimmer.frequency.value = 0.23; const sg = actx.createGain(); sg.gain.value = 0.01; shimmer.connect(sg).connect(warm.gain); shimmer.start();
+  const breeze = actx.createBufferSource(); breeze.buffer = buf; breeze.loop = true; breeze.playbackRate.value = 1.6;
+  const bf = actx.createBiquadFilter(); bf.type = 'bandpass'; bf.frequency.value = 1400; bf.Q.value = 0.6;
+  const bg = actx.createGain(); bg.gain.value = 0.05;
+  breeze.connect(bf).connect(bg).connect(dayBus); breeze.start();
+  birdLoop();
+}
+function setAudioDay(toDay, dur) {
+  if (!actx) return;
+  const t = actx.currentTime;
+  for (const [bus, v] of [[nightBus, toDay ? 0 : 1], [dayBus, toDay ? 1 : 0]]) {
+    bus.gain.cancelScheduledValues(t); bus.gain.setValueAtTime(bus.gain.value, t); bus.gain.linearRampToValueAtTime(v, t + dur);
+  }
+}
+// Petits oiseaux : quelques notes très aiguës qui glissent, à une position stéréo au hasard, toutes les 0,7 à 3,5 s.
+function chirp() {
+  const t0 = actx.currentTime, pan = actx.createStereoPanner(); pan.pan.value = Math.random() * 1.6 - 0.8;
+  const out = actx.createGain(); out.gain.value = 0.05 + Math.random() * 0.05; out.connect(pan).connect(dayBus);
+  const base = 2200 + Math.random() * 2400, notes = 2 + Math.floor(Math.random() * 6), trill = Math.random() < 0.3;
+  for (let i = 0; i < notes; i++) {
+    const t = t0 + i * (trill ? 0.06 : 0.09 + Math.random() * 0.08), d = trill ? 0.045 : 0.06 + Math.random() * 0.07;
+    const o = actx.createOscillator(), g = actx.createGain(); o.type = 'sine';
+    const f = base * (0.85 + Math.random() * 0.3);
+    o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * (Math.random() < 0.5 ? 1.35 : 0.7), t + d);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1, t + 0.008); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.02);
+  }
+}
+function birdLoop() {
+  if (actx && !muted && dayK > 0.4) chirp();
+  setTimeout(birdLoop, 700 + Math.random() * 2800);
+}
+// Bascule : grondement, souffle qui monte, puis arpège (majeur vers le jour, mineur descendant vers la nuit).
+function playTransition(toDay) {
+  if (!actx || muted) return;
+  const t = actx.currentTime;
+  const boom = actx.createOscillator(), bg = actx.createGain(); boom.type = 'sine';
+  boom.frequency.setValueAtTime(90, t); boom.frequency.exponentialRampToValueAtTime(35, t + 2.5);
+  bg.gain.setValueAtTime(0.5, t); bg.gain.exponentialRampToValueAtTime(0.001, t + 3); boom.connect(bg).connect(master); boom.start(t); boom.stop(t + 3.1);
+  const len = actx.sampleRate * 3, nb = actx.createBuffer(1, len, actx.sampleRate), d = nb.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const n = actx.createBufferSource(); n.buffer = nb;
+  const nf = actx.createBiquadFilter(); nf.type = 'bandpass'; nf.Q.value = 1.2;
+  nf.frequency.setValueAtTime(toDay ? 200 : 4000, t); nf.frequency.exponentialRampToValueAtTime(toDay ? 5000 : 180, t + 2.6);
+  const ng = actx.createGain(); ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(0.25, t + 1.2); ng.gain.exponentialRampToValueAtTime(0.001, t + 3);
+  n.connect(nf).connect(ng).connect(master); n.start(t);
+  const notes = toDay ? [523, 659, 784, 1047, 1319, 1568, 2093] : [1760, 1397, 1175, 880, 698, 587, 440];
+  notes.forEach((f, i) => {
+    const o = actx.createOscillator(), g = actx.createGain(); o.type = 'sine'; o.frequency.value = f;
+    const s = t + 0.4 + i * 0.13;
+    g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(0.14, s + 0.02); g.gain.exponentialRampToValueAtTime(0.001, s + 2.5);
+    o.connect(g).connect(master); o.start(s); o.stop(s + 2.6);
+  });
 }
 function playHowl() {
   if (!actx || muted) return;
@@ -1047,7 +1168,11 @@ const shardsEl = document.getElementById('shards');
 for (let i = 0; i < shards.length; i++) { const d = document.createElement('span'); d.className = 'shard-ico'; shardsEl.appendChild(d); }
 const countEl = document.createElement('span'); countEl.className = 'count'; shardsEl.appendChild(countEl);
 let collected = 0;
-function updateShardHud() { [...shardsEl.querySelectorAll('.shard-ico')].forEach((d, i) => d.classList.toggle('on', i < collected)); countEl.textContent = `${collected} / ${shards.length}`; }
+function updateShardHud() {
+  [...shardsEl.querySelectorAll('.shard-ico')].forEach((d, i) => d.classList.toggle('on', i < collected));
+  countEl.textContent = `${collected} / ${CRYSTAL_N}`;
+  document.getElementById('shardLabel').textContent = KINDS[isDay ? 'sun' : 'moon'].label;
+}
 updateShardHud();
 let toastTimer = 0;
 function toast(title, sub = '', ms = 3200) {
@@ -1068,29 +1193,32 @@ let curZone = zoneName(W.x, W.z), zoneCand = curZone, zoneT = 0;
 /* ---------- Mini-carte ---------- */
 const mapCv = document.getElementById('map'), mctx = mapCv.getContext('2d');
 const MAP_VIEW = 110; // rayon affiché autour du loup, en unités du monde
-const mapBase = document.createElement('canvas'); mapBase.width = mapBase.height = N + 1;
-{
-  const x = mapBase.getContext('2d'), img = x.createImageData(N + 1, N + 1);
+function makeMapBase(day) {
+  const cv = document.createElement('canvas'); cv.width = cv.height = N + 1;
+  const x = cv.getContext('2d'), img = x.createImageData(N + 1, N + 1);
   for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
     const wx = -SIZE / 2 + i * STEP, wz = -SIZE / 2 + j * STEP, h = HGRID[j * (N + 1) + i];
     let c;
-    if (h < 0) c = [18, 38, 66];
-    else if (h > MAX_WALK_H) { const k = Math.min(1, (h - MAX_WALK_H) / 25); c = [60 + k * 70, 60 + k * 74, 74 + k * 84]; }
-    else { const f = smooth(-0.06, 0.18, FD(wx, wz)); c = [lerp(58, 22, f), lerp(76, 40, f), lerp(56, 34, f)]; }
+    if (h < 0) c = day ? [56, 150, 200] : [18, 38, 66];
+    else if (h > MAX_WALK_H) { const k = Math.min(1, (h - MAX_WALK_H) / 25); c = day ? [150 + k * 90, 142 + k * 100, 125 + k * 110] : [60 + k * 70, 60 + k * 74, 74 + k * 84]; }
+    else { const f = smooth(-0.06, 0.18, FD(wx, wz)); c = day ? [lerp(130, 60, f), lerp(196, 138, f), lerp(80, 52, f)] : [lerp(58, 22, f), lerp(76, 40, f), lerp(56, 34, f)]; }
     img.data.set([c[0], c[1], c[2], 255], (j * (N + 1) + i) * 4);
   }
   x.putImageData(img, 0, 0);
+  return cv;
 }
+const mapNight = makeMapBase(false), mapDay = makeMapBase(true);
 function drawMap(t) {
   const S = mapCv.width, half = S / 2, scale = S / (MAP_VIEW * 2);
   mctx.save(); mctx.clearRect(0, 0, S, S);
   mctx.translate(half, half); mctx.rotate(Math.PI / 4); mctx.scale(scale, scale); mctx.translate(-W.x, -W.z);
-  mctx.drawImage(mapBase, -SIZE / 2, -SIZE / 2, SIZE, SIZE);
+  mctx.globalAlpha = 1; mctx.drawImage(mapNight, -SIZE / 2, -SIZE / 2, SIZE, SIZE);
+  if (dayK > 0) { mctx.globalAlpha = dayK; mctx.drawImage(mapDay, -SIZE / 2, -SIZE / 2, SIZE, SIZE); mctx.globalAlpha = 1; }
   mctx.fillStyle = 'rgba(230,220,200,0.55)';
   for (const a of animals) { if (Math.abs(a.x - W.x) < MAP_VIEW && Math.abs(a.z - W.z) < MAP_VIEW) { mctx.beginPath(); mctx.arc(a.x, a.z, 1.6, 0, 7); mctx.fill(); } }
-  mctx.fillStyle = `rgba(143,243,255,${0.5 + 0.5 * Math.sin(t * 3)})`;
+  mctx.fillStyle = isDay ? `rgba(255,190,70,${0.6 + 0.4 * Math.sin(t * 3)})` : `rgba(143,243,255,${0.5 + 0.5 * Math.sin(t * 3)})`;
   for (const s of shards) if (!s.taken) { mctx.beginPath(); mctx.arc(s.x, s.z, 4.2, 0, 7); mctx.fill(); }
-  mctx.strokeStyle = collected === shards.length ? '#9ff6ff' : 'rgba(180,140,255,0.8)'; mctx.lineWidth = 2;
+  mctx.strokeStyle = awakened ? (isDay ? '#ffd27a' : '#9ff6ff') : 'rgba(180,140,255,0.8)'; mctx.lineWidth = 2;
   mctx.beginPath(); mctx.arc(0, 0, CIRCLE_R, 0, 7); mctx.stroke();
   mctx.translate(W.x, W.z); mctx.rotate(-W.angle);
   mctx.fillStyle = '#ffffff'; mctx.beginPath(); mctx.moveTo(0, 7); mctx.lineTo(4.5, -4.5); mctx.lineTo(0, -2); mctx.lineTo(-4.5, -4.5); mctx.closePath(); mctx.fill();
@@ -1151,18 +1279,62 @@ function howl() {
   shockRing(W.x, W.y, W.z, 0x8ff3ff, 22, 2.4);
   setTimeout(() => shockRing(W.x, W.y, W.z, 0xb48cff, 16, 2.0), 400);
 }
-let finished = false, awakened = false;
+const NIGHT_MSGS = ['Une lueur froide te traverse.', 'Les runes frémissent au loin.', 'Quelque chose t’observe depuis les arbres.', 'Le vent murmure ton nom.', 'La brume s’écarte un instant.', 'Plus qu’un éclat.'];
+const DAY_MSGS = ['Une chaleur douce court dans ta fourrure.', 'Les oiseaux chantent plus fort.', 'Les fleurs se tournent vers toi.', 'Le vent sent l’herbe tiède.', 'La lumière danse sur l’eau.', 'Plus qu’un cristal.'];
+function updateRunes() {
+  const k = collected / CRYSTAL_N;
+  runeMat.color.set(isDay ? 0x5a3a10 : 0x1b4a5c).lerp(new THREE.Color(isDay ? 0xffd27a : 0x9ff6ff), k).multiplyScalar(1 + k * 1.5);
+  ringMat.color.copy(runeMat.color);
+}
 function collect(s) {
   s.taken = true; collected++;
-  burst(s.x, s.h + 1.6, s.z, 0xbfe6ff);
-  shockRing(s.x, s.h, s.z, 0x8fc8ff, 10, 1.4);
+  const K = KINDS[isDay ? 'sun' : 'moon'];
+  burst(s.x, s.h + 1.6, s.z, K.burst);
+  shockRing(s.x, s.h, s.z, K.ring, 10, 1.4);
   scene.remove(s.g);
   playChime();
-  runeMat.color.set(0x1b4a5c).lerp(new THREE.Color(0x9ff6ff), collected / shards.length).multiplyScalar(1 + collected / shards.length * 1.5);
-  ringMat.color.copy(runeMat.color);
+  updateRunes();
   updateShardHud();
-  if (collected === shards.length) { awakened = true; toast('Les pierres s’éveillent', 'Retourne au Cercle des Pierres Anciennes.', 5000); playChime(true); }
-  else toast(`Éclat de lune ${collected} / ${shards.length}`, ['Une lueur froide te traverse.', 'Les runes frémissent au loin.', 'Quelque chose t’observe depuis les arbres.', 'Le vent murmure ton nom.', 'La brume s’écarte un instant.', 'Les bêtes se taisent sur ton passage.', 'La lune semble plus proche.', 'Plus qu’un éclat.'][collected - 1] || '', 3000);
+  if (collected === CRYSTAL_N) {
+    awakened = true;
+    finalBeam.material.color.set(isDay ? 0xffd27a : 0x9ff6ff);
+    toast(isDay ? 'Les pierres brûlent de soleil' : 'Les pierres s’éveillent', 'Retourne au Cercle des Pierres Anciennes.', 5000);
+    playChime(true);
+  } else toast(`${K.name} ${collected} / ${CRYSTAL_N}`, (isDay ? DAY_MSGS : NIGHT_MSGS)[collected - 1] || '', 3000);
+}
+
+/* ---------- Bascule jour / nuit ---------- */
+let trans = null, beamPulse = 0, shake = 0;
+const flashEl = document.getElementById('flash');
+function flash(color) {
+  flashEl.style.transition = 'none'; flashEl.style.background = color; flashEl.style.opacity = '0.9';
+  void flashEl.offsetWidth;
+  flashEl.style.transition = 'opacity 2.6s ease-out'; flashEl.style.opacity = '0';
+}
+function startTransition() {
+  awakened = false; collected = 0;
+  const toDay = !isDay;
+  isDay = toDay; cycle++;
+  trans = { t: 0, dur: 5, from: dayK, to: toDay ? 1 : 0 };
+  const h0 = groundH(0, 0), col = toDay ? 0xffd27a : 0x9fb8ff;
+  // Le grand effet : éclair, gerbes de lumière, ondes de choc en cascade, colonne de lumière qui s'élargit, secousse.
+  flash(toDay ? '#fff4d6' : '#c4b8ff');
+  burst(0, h0 + 1, 0, col, 260, 2.2);
+  burst(0, h0 + 3, 0, 0xffffff, 140, 1.4);
+  shockRing(0, h0, 0, col, 80, 3.5);
+  setTimeout(() => shockRing(0, h0, 0, 0xffffff, 130, 4.5), 350);
+  setTimeout(() => { shockRing(0, h0, 0, col, 50, 2.8); burst(0, h0 + 2, 0, toDay ? 0xffb347 : 0xb48cff, 180, 1.8); }, 800);
+  setTimeout(() => shockRing(0, h0, 0, toDay ? 0xfff1b8 : 0x8ff3ff, 180, 6), 1300);
+  finalBeam.material.color.set(col);
+  beamPulse = 1; shake = 1;
+  document.body.classList.toggle('day', toDay);
+  playTransition(toDay);
+  setAudioDay(toDay, trans.dur);
+  spawnCrystals(toDay ? 'sun' : 'moon', cycle);
+  updateRunes(); updateShardHud();
+  setTimeout(() => toast(toDay ? 'Le jour se lève' : 'La nuit revient',
+    toDay ? 'Sept cristaux de soleil brillent dans les terres. Rapporte leur lumière au Cercle pour rappeler la nuit.'
+          : 'La lune se souvient de toi. Sept nouveaux éclats sont tombés dans les terres.', 7000), 1400);
 }
 
 function update(dt, t) {
@@ -1233,12 +1405,13 @@ function updateWorld(dt, t) {
     const dx = W.x - s.x, dz = W.z - s.z;
     if (dx * dx + dz * dz < 3.2 && Math.abs(W.y - s.h) < 3) collect(s);
   }
-  // Fin
-  if (awakened && !finished && Math.hypot(W.x, W.z) < 4.2) {
-    finished = true; playChime(true); burst(0, groundH(0, 0) + 1, 0, 0x9ff6ff, 160); shockRing(0, groundH(0, 0), 0, 0x9ff6ff, 40, 3);
-    toast('La première terre est apaisée', 'La lune se souvient de toi. Au-delà des Monts Gris, d’autres terres attendent…', 9000);
-  }
-  if (awakened) finalBeam.material.opacity = THREE.MathUtils.lerp(finalBeam.material.opacity, finished ? 0.35 : 0.12 + Math.sin(t * 2) * 0.04, 0.03);
+  // Retour au Cercle avec les 7 cristaux : bascule jour / nuit
+  if (awakened && !trans && Math.hypot(W.x, W.z) < 4.2) startTransition();
+  if (beamPulse > 0) {
+    beamPulse = Math.max(0, beamPulse - dt * 0.35);
+    finalBeam.material.opacity = 0.9 * beamPulse;
+    finalBeam.scale.set(1 + beamPulse * 5, 1, 1 + beamPulse * 5);
+  } else finalBeam.material.opacity = THREE.MathUtils.lerp(finalBeam.material.opacity, awakened ? 0.12 + Math.sin(t * 2) * 0.04 : 0, 0.03);
 
   // Zone
   const z = zoneName(W.x, W.z);
@@ -1257,7 +1430,7 @@ function updateWorld(dt, t) {
   }
   ashGeo.attributes.position.needsUpdate = true;
   waterTex.offset.x = t * 0.01; waterTex.offset.y = Math.sin(t * 0.2) * 0.02;
-  water.material.emissiveIntensity = 0.2 + Math.sin(t * 0.8) * 0.05;
+  water.material.emissiveIntensity = THREE.MathUtils.lerp(AMB.night.waterEmI, AMB.day.waterEmI, dayK) + Math.sin(t * 0.8) * 0.05;
 
   // Effets
   for (let i = effects.length - 1; i >= 0; i--) { const e = effects[i]; e.life -= dt; if (e.life <= 0) { e.dispose(); effects.splice(i, 1); } else e.update(dt); }
@@ -1270,11 +1443,53 @@ composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.55, 0.62);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+
+/* ---------- Ambiance jour / nuit ---------- */
+// Chaque réglage a une valeur de nuit et une valeur de jour ; dayK (0 = nuit, 1 = jour) les mélange pendant la bascule.
+const C3 = v => new THREE.Color(v);
+const AMB = {
+  night: { bg: C3(0x07080f), fog: C3(0x0c0f1f), fogNear: 95, fogFar: 175, sky: C3(0x3a3a78), ground: C3(0x0a0f0c), hemiI: 1.35,
+    amb: C3(0x1a1c33), ambI: 0.6, sun: C3(0xa9bcff), sunI: 1.6, exp: 1.15, aura: 18, bloom: 0.85, bloomTh: 0.62,
+    water: C3(0x0f2238), waterEm: C3(0x3a6ab0), waterEmI: 0.2, foliage: C3(0xffffff), trunk: C3(0x2b221d), dead: C3(0x77707d),
+    rock: C3(0xffffff), mush: C3(0xffffff), stone: C3(0x2f2e3a), ash: C3(0x9aa2c2), ashO: 0.55, mist: C3(0x7d88b8), mistO: 0.09 },
+  day: { bg: C3(0x9fc4dc), fog: C3(0xf4dfb4), fogNear: 120, fogFar: 260, sky: C3(0xfff0d2), ground: C3(0x5c7f2c), hemiI: 1.5,
+    amb: C3(0xffe7c2), ambI: 0.55, sun: C3(0xffd59c), sunI: 3.4, exp: 1.0, aura: 0, bloom: 0.42, bloomTh: 0.85,
+    water: C3(0x2f8fc0), waterEm: C3(0xfff3c8), waterEmI: 0.32, foliage: new THREE.Color(2.3, 3.4, 1.4), trunk: C3(0x6b4a2f), dead: C3(0xb9a68e),
+    rock: new THREE.Color(1.9, 1.85, 1.7), mush: new THREE.Color(0.35, 0.35, 0.35), stone: C3(0x8d8778), ash: C3(0xffe9a8), ashO: 0.75, mist: C3(0xfff0d0), mistO: 0.035 },
+};
+let dayK = 0;
+function applyAmbience(k) {
+  const N = AMB.night, D = AMB.day, L = (a, b) => a + (b - a) * k;
+  scene.background.lerpColors(N.bg, D.bg, k);
+  scene.fog.color.lerpColors(N.fog, D.fog, k); scene.fog.near = L(N.fogNear, D.fogNear); scene.fog.far = L(N.fogFar, D.fogFar);
+  hemi.color.lerpColors(N.sky, D.sky, k); hemi.groundColor.lerpColors(N.ground, D.ground, k); hemi.intensity = L(N.hemiI, D.hemiI);
+  amb.color.lerpColors(N.amb, D.amb, k); amb.intensity = L(N.ambI, D.ambI);
+  moon.color.lerpColors(N.sun, D.sun, k); moon.intensity = L(N.sunI, D.sunI);
+  moonOffset.lerpVectors(NIGHT_LIGHT_OFFSET, DAY_LIGHT_OFFSET, k);
+  renderer.toneMappingExposure = L(N.exp, D.exp);
+  aura.intensity = L(N.aura, D.aura);
+  bloom.strength = L(N.bloom, D.bloom); bloom.threshold = L(N.bloomTh, D.bloomTh);
+  water.material.color.lerpColors(N.water, D.water, k); water.material.emissive.lerpColors(N.waterEm, D.waterEm, k);
+  foliageMat.color.lerpColors(N.foliage, D.foliage, k); trunkMat.color.lerpColors(N.trunk, D.trunk, k); deadMat.color.lerpColors(N.dead, D.dead, k);
+  rockMat.color.lerpColors(N.rock, D.rock, k); mushMat.color.lerpColors(N.mush, D.mush, k); stoneMat.color.lerpColors(N.stone, D.stone, k);
+  ashMat.color.lerpColors(N.ash, D.ash, k); ashMat.opacity = L(N.ashO, D.ashO);
+  mistMat.color.lerpColors(N.mist, D.mist, k); mistMat.opacity = L(N.mistO, D.mistO);
+  terrainUniforms.uDay.value = k; wispMat.uniforms.uDay.value = k;
+}
+function updateAmbience(dt) {
+  if (!trans) return;
+  trans.t += dt;
+  const u = Math.min(1, trans.t / trans.dur);
+  dayK = trans.from + (trans.to - trans.from) * u * u * (3 - 2 * u);
+  applyAmbience(dayK);
+  if (u >= 1) trans = null;
+}
 addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight); fitCamera(); });
 
 function placeCamera(k) {
   camTarget.lerp(new THREE.Vector3(W.x, W.y + 1, W.z), k);
   camera.position.copy(camTarget).add(camOffset);
+  if (shake > 0) camera.position.add(new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake));
   camera.lookAt(camTarget);
   moon.position.copy(camTarget).add(moonOffset); moon.target.position.copy(camTarget);
   aura.position.set(W.x + 2, W.y + 6, W.z + 2);
@@ -1295,6 +1510,8 @@ function frame() {
     wolf.head.rotation.x = Math.sin(elapsed * 0.7) * 0.06;
   }
   wispMat.uniforms.uTime.value = elapsed;
+  updateAmbience(dt);
+  shake = Math.max(0, shake - dt * 0.6);
   placeCamera(1 - Math.pow(0.0015, dt));
   composer.render();
   if (started) drawMap(elapsed);
@@ -1307,7 +1524,7 @@ function begin() {
   if (started) return;
   started = true; initAudio();
   document.getElementById('intro').classList.add('gone');
-  setTimeout(() => toast('Cercle des Pierres Anciennes', 'Neuf éclats de lune sont tombés dans les terres sauvages. Suis leurs rayons.', 5200), 900);
+  setTimeout(() => toast('Cercle des Pierres Anciennes', 'Sept éclats de lune sont tombés dans les terres sauvages. Suis leurs rayons.', 5200), 900);
   setTimeout(() => { document.getElementById('help').style.opacity = 0.35; }, 14000);
 }
 const startBtn = document.getElementById('start');
