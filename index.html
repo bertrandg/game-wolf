@@ -284,7 +284,6 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
@@ -520,106 +519,209 @@ function hitObs(x, z, y, rad) {
   return false;
 }
 
-/* ---------- Végétation et rochers ---------- */
-// Matériaux partagés et nommés : l'ambiance jour/nuit change leur teinte d'un coup pour tout le monde.
-const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 });
-const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2b221d, flatShading: true, roughness: 1 });
-const deadMat = new THREE.MeshStandardMaterial({ color: 0x77707d, flatShading: true, roughness: 1 });
-const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.95 });
-const mushMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
-/* ---------- Pins ---------- */
+/* ---------- Nature : arbres, plantes, rochers (Stylized Nature MegaKit de Quaternius, CC0) ---------- */
+// 1) Les emplacements et les collisions sont calculés tout de suite (les éclats et les animaux en dépendent).
+// 2) Les modèles 3D (assets/nature.glb) sont chargés ensuite et dessinés en instances, regroupées par bloc de terrain.
 const dummy = new THREE.Object3D();
-{
-  const foliage = mergeGeometries([
-    new THREE.ConeGeometry(1.6, 2.4, 7).translate(0, 2.3, 0),
-    new THREE.ConeGeometry(1.25, 2.0, 7).translate(0, 3.4, 0),
-    new THREE.ConeGeometry(0.85, 1.7, 7).translate(0, 4.4, 0),
-  ]);
-  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 1.6, 6).translate(0, 0.8, 0);
-  const pts = [];
-  for (let i = 0; i < 70000 && pts.length < 11000; i++) {
-    const x = (rand() * 2 - 1) * R * 1.1, z = (rand() * 2 - 1) * R * 1.1;
-    if (Math.hypot(x, z) < 22) continue;
-    const h = groundH(x, z); if (h < 0.5 || h > 17) continue;
-    let prob = smooth(-0.06, 0.18, FD(x, z)) * 0.68 + 0.015;
-    if (h > 7) prob *= 0.55;
-    if (rand() > prob) continue;
-    if (hitObs(x, z, h, 1.9)) continue;
-    const s = 0.75 + rand() * 0.8;
-    dummy.position.set(x, h - 0.1, z);
-    dummy.rotation.set((rand() - 0.5) * 0.08, rand() * 6.28, (rand() - 0.5) * 0.08);
-    dummy.scale.set(s, s * (0.9 + rand() * 0.4), s);
-    dummy.updateMatrix();
-    pts.push({ x, z, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(0.42 + rand() * 0.12, 0.25 + rand() * 0.15, 0.09 + rand() * 0.06) });
-    addObs(x, z, 0.32 * s, h + 30);
-  }
-  addChunkedInstances(foliage, foliageMat, pts, { cast: true, receive: true, color: true });
-  addChunkedInstances(trunk, trunkMat, pts, { cast: true });
+const placed = {}; // nom du modèle → [{ x, z, m }]
+function place(model, x, y, z, s, tilt = 0) {
+  dummy.position.set(x, y, z);
+  dummy.rotation.set((rand() - 0.5) * tilt, rand() * 6.28, (rand() - 0.5) * tilt);
+  dummy.scale.setScalar(s);
+  dummy.updateMatrix();
+  (placed[model] ||= []).push({ x, z, m: dummy.matrix.clone() });
 }
-
-/* ---------- Arbres morts ---------- */
-{
-  const geo = mergeGeometries([
-    new THREE.CylinderGeometry(0.1, 0.24, 4.6, 5).translate(0, 2.3, 0),
-    new THREE.CylinderGeometry(0.04, 0.09, 2.0, 4).rotateZ(0.95).translate(0.7, 3.2, 0),
-    new THREE.CylinderGeometry(0.04, 0.08, 1.6, 4).rotateZ(-0.8).translate(-0.5, 2.6, 0.1),
-    new THREE.CylinderGeometry(0.03, 0.07, 1.4, 4).rotateX(0.9).translate(0, 3.7, 0.45),
-    new THREE.CylinderGeometry(0.03, 0.06, 1.1, 4).rotateZ(0.5).rotateX(-0.6).translate(0.2, 4.2, -0.35),
-  ]);
-  const pts = [];
-  for (let i = 0; i < 20000 && pts.length < 750; i++) {
-    const x = (rand() * 2 - 1) * R, z = (rand() * 2 - 1) * R;
-    if (Math.hypot(x, z) < 16) continue;
-    const h = groundH(x, z); if (h < 0.15 || h > 6) continue;
-    if (FD(x, z) > 0.06 && rand() > 0.15) continue;
-    if (hitObs(x, z, h, 2.2)) continue;
-    dummy.position.set(x, h - 0.1, z);
-    dummy.rotation.set((rand() - 0.5) * 0.25, rand() * 6.28, (rand() - 0.5) * 0.25);
-    dummy.scale.setScalar(0.7 + rand() * 0.7); dummy.updateMatrix();
-    pts.push({ x, z, m: dummy.matrix.clone() });
-    addObs(x, z, 0.28, h + 30);
+const pick = list => list[Math.floor(rand() * list.length)];
+function scatter(count, tries, test) {
+  let n = 0;
+  for (let i = 0; i < tries && n < count; i++) {
+    const x = (rand() * 2 - 1) * R * 1.05, z = (rand() * 2 - 1) * R * 1.05, h = groundH(x, z);
+    if (test(x, z, h)) n++;
   }
-  addChunkedInstances(geo, deadMat, pts, { cast: true });
 }
-
-/* ---------- Rochers ---------- */
-{
-  const pts = [];
-  for (let i = 0; i < 24000 && pts.length < 2400; i++) {
-    const x = (rand() * 2 - 1) * R * 1.05, z = (rand() * 2 - 1) * R * 1.05;
-    if (Math.hypot(x, z) < 14) continue;
-    const h = groundH(x, z); if (h < -1.5) continue;
-    if (h < 6 && rand() > 0.45) continue;
-    const s = 0.3 + Math.pow(rand(), 2) * 2.2;
-    if (hitObs(x, z, h, s + 0.6)) continue;
-    dummy.position.set(x, h + s * 0.25, z);
-    dummy.rotation.set(rand() * 3, rand() * 3, rand() * 3);
-    dummy.scale.set(s * (0.8 + rand() * 0.5), s * (0.6 + rand() * 0.4), s * (0.8 + rand() * 0.5));
-    dummy.updateMatrix();
-    pts.push({ x, z, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(0.68, 0.06, 0.2 + rand() * 0.1) });
-    if (s > 0.55) addObs(x, z, s * 0.85, h + s * 0.9);
+// Arbres : pins en forêt dense et sur les pentes, feuillus en lisière et dans les clairières.
+scatter(6000, 60000, (x, z, h) => {
+  if (Math.hypot(x, z) < 22 || h < 0.5 || h > 17) return false;
+  const fd = FD(x, z);
+  let prob = smooth(-0.06, 0.18, fd) * 0.6 + 0.012;
+  if (h > 7) prob *= 0.55;
+  if (rand() > prob || hitObs(x, z, h, 2.4)) return false;
+  const s = 0.72 + rand() * 0.35;
+  const model = h > 7 || fd > 0.12 ? pick(['Pine_5', 'Pine_5', 'Pine_1', 'Pine_2']) : pick(['CommonTree_5', 'CommonTree_3', 'Pine_5', 'CommonTree_5']);
+  place(model, x, h - 0.15, z, s, 0.06);
+  addObs(x, z, 0.38 * s, h + 30);
+  return true;
+});
+// Arbres morts, plutôt en clairière et au bord de l'eau.
+scatter(380, 20000, (x, z, h) => {
+  if (Math.hypot(x, z) < 16 || h < 0.15 || h > 6) return false;
+  if (FD(x, z) > 0.06 && rand() > 0.15) return false;
+  if (hitObs(x, z, h, 2.6)) return false;
+  const s = 0.42 + rand() * 0.25;
+  place(pick(['DeadTree_1', 'DeadTree_3']), x, h - 0.15, z, s, 0.12);
+  addObs(x, z, 0.5 * s, h + 30);
+  return true;
+});
+// Quelques grands arbres tortueux isolés, repères dans les clairières.
+scatter(34, 20000, (x, z, h) => {
+  if (Math.hypot(x, z) < 45 || h < 0.8 || h > 4.5 || FD(x, z) > -0.02) return false;
+  if (hitObs(x, z, h, 7)) return false;
+  const s = 0.55 + rand() * 0.15;
+  place('TwistedTree_1', x, h - 0.15, z, s);
+  addObs(x, z, 1.1 * s, h + 30);
+  return true;
+});
+// Rochers (bloquent le loup, sauf les petits qu'il peut enjamber d'un saut).
+scatter(1800, 24000, (x, z, h) => {
+  if (Math.hypot(x, z) < 14 || h < -1.5) return false;
+  if (h < 6 && rand() > 0.45) return false;
+  const s = 0.3 + Math.pow(rand(), 2) * 1.3;
+  if (hitObs(x, z, h, s * 1.4 + 0.6)) return false;
+  place(pick(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3']), x, h - 0.1 * s, z, s, 0.3);
+  if (s > 0.4) addObs(x, z, s * 1.3, h + s * 1.8);
+  return true;
+});
+// Buissons, fougères, fleurs, petites plantes, galets : décor que le loup traverse.
+scatter(1800, 20000, (x, z, h) => {
+  if (Math.hypot(x, z) < 12 || h < 0.5 || h > 6.5 || hitObs(x, z, h, 0.8)) return false;
+  place(FD(x, z) < 0 && rand() < 0.5 ? 'Bush_Common_Flowers' : 'Bush_Common', x, h - 0.1, z, 0.8 + rand() * 0.5);
+  return true;
+});
+scatter(1600, 20000, (x, z, h) => {
+  if (h < 0.5 || h > 6 || FD(x, z) < 0.05 || hitObs(x, z, h, 0.5)) return false;
+  place('Fern_1', x, h - 0.05, z, 0.6 + rand() * 0.45);
+  return true;
+});
+scatter(1500, 20000, (x, z, h) => {
+  if (Math.hypot(x, z) < 10 || h < 0.5 || h > 5 || FD(x, z) > 0.02) return false;
+  place(pick(['Flower_3_Group', 'Flower_4_Group']), x, h - 0.03, z, 0.5 + rand() * 0.35);
+  return true;
+});
+scatter(2200, 20000, (x, z, h) => {
+  if (h < 0.4 || h > 6.5) return false;
+  place(pick(['Plant_1', 'Plant_7_Big', 'Clover_1']), x, h - 0.03, z, 0.7 + rand() * 0.6);
+  return true;
+});
+scatter(1500, 30000, (x, z, h) => {
+  if (h < -0.4 || h > 1.3) return false;
+  place(pick(['Pebble_Round_1', 'Pebble_Square_2']), x, h - 0.02, z, 1.5 + rand() * 2);
+  return true;
+});
+// Champignons lumineux, en petits groupes sous les arbres.
+scatter(500, 16000, (x, z, h) => {
+  if (h < 0.4 || h > 6) return false;
+  if (FD(x, z) < 0.05 && rand() > 0.2) return false;
+  const n = 3 + Math.floor(rand() * 5);
+  for (let k = 0; k < n; k++) {
+    const px = x + (rand() - 0.5) * 2.4, pz = z + (rand() - 0.5) * 2.4;
+    place('Mushroom_Common', px, groundH(px, pz) - 0.02, pz, 0.8 + rand() * 0.9);
   }
-  addChunkedInstances(new THREE.IcosahedronGeometry(1, 0), rockMat, pts, { cast: true, receive: true, color: true });
-}
+  return true;
+});
 
-/* ---------- Champignons luminescents ---------- */
-{
-  const cap = new THREE.SphereGeometry(0.2, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2);
-  const pts = [];
-  dummy.rotation.set(0, 0, 0);
-  for (let c = 0; c < 16000 && pts.length < 2400; c++) {
-    const x = (rand() * 2 - 1) * R * 0.9, z = (rand() * 2 - 1) * R * 0.9;
-    const h = groundH(x, z); if (h < 0.4 || h > 6) continue;
-    if (FD(x, z) < 0.05 && rand() > 0.2) continue;
-    const n = 3 + Math.floor(rand() * 5), hue = rand() < 0.65 ? 0.5 : 0.76;
-    for (let k = 0; k < n; k++) {
-      const px = x + (rand() - 0.5) * 2.4, pz = z + (rand() - 0.5) * 2.4, s = 0.6 + rand() * 0.9;
-      dummy.position.set(px, groundH(px, pz) + 0.12 * s, pz); dummy.scale.set(s, s * 0.8, s); dummy.updateMatrix();
-      pts.push({ x: px, z: pz, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(hue + (rand() - 0.5) * 0.05, 1, 0.55).multiplyScalar(1.6) });
+// Teinte des matériaux selon l'ambiance : la nuit assombrit et bleuit les textures, le jour les laisse éclatantes.
+const natureMats = []; // { mat, role }
+const NATURE_TINT = {
+  leaf: [new THREE.Color(0.26, 0.36, 0.46), new THREE.Color(1.05, 1.05, 0.95)],
+  bark: [new THREE.Color(0.3, 0.3, 0.4), new THREE.Color(1, 0.98, 0.95)],
+  rock: [new THREE.Color(0.38, 0.38, 0.5), new THREE.Color(1, 1, 1)],
+  flower: [new THREE.Color(0.35, 0.35, 0.55), new THREE.Color(1.1, 1.05, 1.05)],
+  mush: [new THREE.Color(0.55, 0.55, 0.7), new THREE.Color(1, 1, 1)],
+};
+function materialRole(name) {
+  if (/bark/i.test(name)) return 'bark';
+  if (/rock/i.test(name)) return 'rock';
+  if (/flower/i.test(name)) return 'flower';
+  if (/mushroom/i.test(name)) return 'mush';
+  return 'leaf';
+}
+const grassUniforms = { uTime: { value: 0 } };
+const grass = { meshes: [], cell: 1.7, radius: isTouch ? 26 : 38, cx: null, cz: null };
+let natureLoaded = false;
+
+// Instances d'un modèle (une instance par emplacement), découpées par bloc ; chaque sous-maillage garde son matériau.
+function addModelInstances(tplRoot, items, opts) {
+  tplRoot.updateMatrixWorld(true);
+  const tmp = new THREE.Matrix4();
+  tplRoot.traverse(o => {
+    if (!o.isMesh) return;
+    const local = o.matrixWorld.clone();
+    addChunkedInstances(o.geometry, o.material, items.map(it => ({ x: it.x, z: it.z, m: tmp.multiplyMatrices(it.m, local).clone() })), opts);
+  });
+}
+// Herbe : un nombre fixe de touffes autour du loup, replacées quand il change de case (positions stables dans le monde).
+function hash2(i, j, k) { let h = (i * 374761393 + j * 668265263 + k * 1442695041) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function updateGrass(force = false) {
+  if (!grass.meshes.length) return;
+  const cx = Math.floor(W.x / grass.cell), cz = Math.floor(W.z / grass.cell);
+  if (!force && cx === grass.cx && cz === grass.cz) return;
+  grass.cx = cx; grass.cz = cz;
+  const rc = Math.ceil(grass.radius / grass.cell), counts = grass.meshes.map(() => 0);
+  for (let i = -rc; i <= rc; i++) for (let j = -rc; j <= rc; j++) {
+    if (i * i + j * j > rc * rc) continue;
+    const ix = cx + i, iz = cz + j;
+    const r1 = hash2(ix, iz, 1), r2 = hash2(ix, iz, 2), r3 = hash2(ix, iz, 3), r4 = hash2(ix, iz, 4);
+    const x = (ix + r1) * grass.cell, z = (iz + r2) * grass.cell, h = groundH(x, z);
+    if (h < 0.35 || h > 6.5 || x * x + z * z < 121) continue; // pas d'herbe dans le Cercle
+    if (r3 > (FD(x, z) > 0.08 ? 0.35 : 0.85)) continue;
+    const v = Math.floor(r4 * grass.meshes.length * 0.999), g = grass.meshes[v];
+    if (counts[v] >= g.max) continue;
+    dummy.position.set(x, h - 0.05, z); dummy.rotation.set(0, r1 * 6.28, 0); dummy.scale.setScalar(0.4 + r2 * 0.4); dummy.updateMatrix();
+    for (const m of g.list) m.setMatrixAt(counts[v], tmpGrass.multiplyMatrices(dummy.matrix, m.userData.local));
+    counts[v]++;
+  }
+  grass.meshes.forEach((g, v) => { for (const m of g.list) { m.count = counts[v]; m.instanceMatrix.needsUpdate = true; } });
+}
+const tmpGrass = new THREE.Matrix4();
+
+const natureReady = new GLTFLoader().loadAsync('assets/nature.glb').then(gltf => {
+  const tpl = {};
+  for (const sc of gltf.scenes) for (const c of sc.children) tpl[c.name] = c;
+  const seen = new Set();
+  for (const sc of gltf.scenes) sc.traverse(o => {
+    if (!o.isMesh || seen.has(o.material)) return;
+    const m = o.material; seen.add(m);
+    m.vertexColors = false; // les couleurs de sommet du pack servent au vent dans d'autres moteurs
+    m.metalness = 0; m.roughness = 1;
+    const role = materialRole(m.name);
+    if (role === 'mush') { m.emissive = new THREE.Color(0x3fe8ff); m.emissiveIntensity = 0.9; }
+    if (/grass/i.test(m.name)) {
+      // L'herbe ondule doucement : décalage du haut des brins selon le temps et la position.
+      m.onBeforeCompile = sh => {
+        sh.uniforms.uTime = grassUniforms.uTime;
+        sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+          vec4 gw = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+          float sway = sin(uTime * 1.7 + gw.x * 0.35 + gw.z * 0.25) * 0.12 * max(position.y, 0.0);
+          transformed.x += sway; transformed.z += sway * 0.6;`);
+      };
     }
+    m.needsUpdate = true;
+    natureMats.push({ mat: m, role });
+  });
+  const cast = { Rock_Medium_1: 1, Rock_Medium_2: 1, Rock_Medium_3: 1, Bush_Common: 1, Bush_Common_Flowers: 1 };
+  for (const [name, items] of Object.entries(placed)) {
+    if (!tpl[name]) { console.warn('Modèle absent du pack :', name); continue; }
+    const tree = /Tree|Pine/.test(name);
+    addModelInstances(tpl[name], items, { cast: tree || !!cast[name], receive: !/Pebble/.test(name) });
   }
-  addChunkedInstances(cap, mushMat, pts, { color: true });
-}
+  // Herbe autour du loup
+  const perVariant = isTouch ? 700 : 1500;
+  for (const name of ['Grass_Common_Short', 'Grass_Wispy_Short', 'Grass_Common_Tall']) {
+    if (!tpl[name]) continue;
+    tpl[name].updateMatrixWorld(true);
+    const list = [];
+    tpl[name].traverse(o => {
+      if (!o.isMesh) return;
+      const m = new THREE.InstancedMesh(o.geometry, o.material, perVariant);
+      m.userData.local = o.matrixWorld.clone(); m.count = 0; m.frustumCulled = false; m.receiveShadow = true;
+      scene.add(m); list.push(m);
+    });
+    grass.meshes.push({ list, max: perVariant });
+  }
+  natureLoaded = true;
+  applyAmbience(dayK);
+  updateGrass(true);
+}).catch(err => console.warn('Décor nature indisponible :', err));
 
 /* ---------- Cercle des Pierres Anciennes ---------- */
 const runeMat = new THREE.MeshBasicMaterial({ color: 0x1b4a5c, toneMapped: false });
@@ -1566,12 +1668,12 @@ const C3 = v => new THREE.Color(v);
 const AMB = {
   night: { bg: C3(0x07080f), fog: C3(0x0c0f1f), fogNear: 95, fogFar: 175, sky: C3(0x3a3a78), ground: C3(0x0a0f0c), hemiI: 1.35,
     amb: C3(0x1a1c33), ambI: 0.6, sun: C3(0xa9bcff), sunI: 1.6, exp: 1.15, aura: 18, bloom: 0.85, bloomTh: 0.62,
-    water: C3(0x0f2238), waterEm: C3(0x3a6ab0), waterEmI: 0.2, foliage: C3(0xffffff), trunk: C3(0x2b221d), dead: C3(0x77707d),
-    rock: C3(0xffffff), mush: C3(0xffffff), stone: C3(0x2f2e3a), ash: C3(0x9aa2c2), ashO: 0.55, mist: C3(0x7d88b8), mistO: 0.09 },
+    water: C3(0x0f2238), waterEm: C3(0x3a6ab0), waterEmI: 0.2,
+    stone: C3(0x2f2e3a), ash: C3(0x9aa2c2), ashO: 0.55, mist: C3(0x7d88b8), mistO: 0.09 },
   day: { bg: C3(0x9fc4dc), fog: C3(0xf4dfb4), fogNear: 120, fogFar: 260, sky: C3(0xfff0d2), ground: C3(0x5c7f2c), hemiI: 1.5,
     amb: C3(0xffe7c2), ambI: 0.55, sun: C3(0xffd59c), sunI: 3.4, exp: 1.0, aura: 0, bloom: 0.42, bloomTh: 0.85,
-    water: C3(0x2f8fc0), waterEm: C3(0xfff3c8), waterEmI: 0.32, foliage: new THREE.Color(2.3, 3.4, 1.4), trunk: C3(0x6b4a2f), dead: C3(0xb9a68e),
-    rock: new THREE.Color(1.9, 1.85, 1.7), mush: new THREE.Color(0.35, 0.35, 0.35), stone: C3(0x8d8778), ash: C3(0xffe9a8), ashO: 0.75, mist: C3(0xfff0d0), mistO: 0.035 },
+    water: C3(0x2f8fc0), waterEm: C3(0xfff3c8), waterEmI: 0.32,
+    stone: C3(0x8d8778), ash: C3(0xffe9a8), ashO: 0.75, mist: C3(0xfff0d0), mistO: 0.035 },
 };
 let dayK = 0;
 function applyAmbience(k) {
@@ -1586,8 +1688,11 @@ function applyAmbience(k) {
   aura.intensity = L(N.aura, D.aura);
   bloom.strength = L(N.bloom, D.bloom); bloom.threshold = L(N.bloomTh, D.bloomTh);
   water.material.color.lerpColors(N.water, D.water, k); water.material.emissive.lerpColors(N.waterEm, D.waterEm, k);
-  foliageMat.color.lerpColors(N.foliage, D.foliage, k); trunkMat.color.lerpColors(N.trunk, D.trunk, k); deadMat.color.lerpColors(N.dead, D.dead, k);
-  rockMat.color.lerpColors(N.rock, D.rock, k); mushMat.color.lerpColors(N.mush, D.mush, k); stoneMat.color.lerpColors(N.stone, D.stone, k);
+  for (const { mat, role } of natureMats) {
+    const [n, d] = NATURE_TINT[role]; mat.color.lerpColors(n, d, k);
+    if (role === 'mush') mat.emissiveIntensity = L(0.9, 0);
+  }
+  stoneMat.color.lerpColors(N.stone, D.stone, k);
   ashMat.color.lerpColors(N.ash, D.ash, k); ashMat.opacity = L(N.ashO, D.ashO);
   mistMat.color.lerpColors(N.mist, D.mist, k); mistMat.opacity = L(N.mistO, D.mistO);
   terrainUniforms.uDay.value = k; wispMat.uniforms.uDay.value = k;
@@ -1663,6 +1768,8 @@ function frame() {
     wolf.head.rotation.x = Math.sin(elapsed * 0.7) * 0.06;
   }
   wispMat.uniforms.uTime.value = elapsed;
+  grassUniforms.uTime.value = elapsed;
+  updateGrass();
   updateAmbience(dt);
   shake = Math.max(0, shake - dt * 0.6);
   placeCamera(1 - Math.pow(0.0015, dt));
@@ -1681,7 +1788,7 @@ function begin() {
   setTimeout(() => { document.getElementById('help').style.opacity = 0.35; }, 14000);
 }
 const startBtn = document.getElementById('start');
-startBtn.disabled = false; startBtn.textContent = 'Entrer dans la nuit';
+natureReady.finally(() => { startBtn.disabled = false; startBtn.textContent = 'Entrer dans la nuit'; startBtn.focus(); });
 loadAnimals();
 startBtn.addEventListener('click', begin);
 startBtn.focus();

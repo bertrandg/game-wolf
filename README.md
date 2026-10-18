@@ -25,12 +25,14 @@ Sur mobile : joystick à gauche (poussé à fond pour courir), boutons Sauter et
 - Monde généré procéduralement (bruit de Perlin, graine fixe) sur environ 720 × 720 unités.
 - Sons synthétisés avec la Web Audio API, aucun fichier audio : vent et nappe grave la nuit, accord chaud, brise et oiseaux le jour.
 - Bascule jour / nuit : chaque sommet du terrain porte une couleur de nuit et une de jour, mélangées dans le shader ; lumières, brouillard, eau, végétation et particules suivent le même curseur.
+- Arbres, buissons, fleurs, fougères, herbe, rochers, galets et champignons : *Stylized Nature MegaKit* (version gratuite) de [Quaternius](https://quaternius.com/), licence CC0. 25 modèles regroupés dans `assets/nature.glb` (textures réduites à 512 px en WebP, cartes de relief retirées) : environ 2 Mo au lieu de 34 Mo.
 - Loup et animaux : pack *Ultimate Animated Animals* de [Quaternius](https://quaternius.com/), licence CC0. Les modèles ont été convertis en GLB compressé avec [glTF Transform](https://gltf-transform.dev/) (quantification, animations inutilisées retirées) : environ 330 Ko par animal au lieu de 3 Mo.
 
 ### Performances
 
 - Terrain découpé en 12 × 12 blocs, arbres, rochers et champignons regroupés par bloc : seuls les blocs visibles sont dessinés.
 - La hauteur du sol est lue dans une grille précalculée au lieu de recalculer le bruit.
+- L'herbe n'existe qu'autour du loup : un nombre fixe de touffes est replacé quand il change de case, aux mêmes endroits du monde à chaque passage. Elle ondule grâce au shader.
 - Les feux follets flottent grâce à un shader : aucun calcul processeur par image.
 - Les animaux loin du loup sont cachés et simulés grossièrement deux fois par seconde, sans animation.
 - Qualité adaptative : sur mobile, résolution limitée à 1×, bloom en demi-résolution et ombres plus légères. Si les images ralentissent (moins de 40 par seconde), le jeu baisse d'un cran (résolution, bloom, ombres), puis remonte quand tout redevient fluide.
