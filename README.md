@@ -36,7 +36,8 @@ Sur mobile : joystick à gauche (poussé à fond pour courir), boutons Sauter et
 - Les feux follets flottent grâce à un shader : aucun calcul processeur par image.
 - Les animaux loin du loup sont cachés et simulés grossièrement deux fois par seconde, sans animation.
 - Anticrénelage : MSAA 4× sur les cibles de rendu (le bloom empêche l'anticrénelage natif du canvas), alpha-to-coverage pour les bords des feuilles et des fleurs, filtrage anisotrope des textures. En qualité basse, un filtre FXAA remplace le MSAA.
-- Qualité adaptative : sur mobile, résolution limitée à 1,25×, bloom en demi-résolution et ombres plus légères. Si les images ralentissent (moins de 40 par seconde), le jeu baisse d'un cran (résolution, bloom, ombres), puis remonte quand tout redevient fluide.
+- Pas d'à-coups en marchant : shaders compilés et décor envoyé au GPU pendant l'écran d'accueil, herbe recalculée tous les 3 pas seulement à partir d'une grille précalculée, mini-carte redessinée 10 fois par seconde, zone d'ombre ajustée au champ visible.
+- Qualité adaptative : sur mobile, résolution limitée à 1,25×, bloom en demi-résolution et ombres plus légères. Si les images ralentissent (moins de 50 par seconde), le jeu baisse d'un cran (résolution, bloom, ombres), puis remonte quand tout redevient fluide.
 
 ## Lancer en local
 

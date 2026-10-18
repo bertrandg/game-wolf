@@ -18,6 +18,9 @@
   --sun: #ffd27a;
   --ember: #ffb347;
   --panel: rgba(10, 12, 24, 0.62);
+  --plate: rgba(6, 8, 16, 0.7);
+  --plate-line: rgba(143, 243, 255, 0.2);
+  --outline: 0 0 2px rgba(0, 0, 0, 0.9), 0 1px 3px rgba(0, 0, 0, 0.8);
   --line: rgba(143, 243, 255, 0.22);
   --display: "Cinzel", "Trajan Pro", "Times New Roman", serif;
   --body: "Cormorant Garamond", "Garamond", Georgia, serif;
@@ -49,29 +52,35 @@ body.day #sunglare { opacity: 1; }
 #flash { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
 .vignette { transition: opacity 5s; }
 body.day .vignette { opacity: 0.3; }
-body.day .hud, body.day .toast { text-shadow: 0 1px 2px rgba(20, 14, 4, 0.85), 0 0 18px rgba(60, 35, 0, 0.45); }
 body.day .hud-title .zone, body.day .toast small { color: var(--sun); }
 body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--ember); }
+/* Plaques sombres derrière les textes : lisibles sur la nuit comme sur le jour (pas de flou, coûteux sur mobile). */
+.hud-title, .hud-shards, .hud-help, .toast {
+  background: var(--plate); border: 1px solid var(--plate-line); border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+.hud-title, .hud-shards { padding: 8px 14px 9px; }
+.hud-help { padding: 8px 12px; }
 .hud-title {
-  top: calc(18px + env(safe-area-inset-top, 0px));
+  top: calc(16px + env(safe-area-inset-top, 0px));
   left: max(20px, env(safe-area-inset-left, 0px));
 }
 .hud-title h1 {
   margin: 0; font-family: var(--display); font-weight: 600;
   font-size: clamp(14px, 2vw, 19px); letter-spacing: 0.32em; text-transform: uppercase;
-  color: var(--ink); text-shadow: 0 0 18px rgba(143, 243, 255, 0.35);
+  color: var(--ink); text-shadow: var(--outline);
 }
 .hud-title .zone {
-  margin-top: 4px; font-style: italic; font-size: clamp(16px, 2.2vw, 21px); color: var(--spirit);
-  opacity: 0.85; transition: opacity 0.6s;
+  margin-top: 2px; font-style: italic; font-size: clamp(16px, 2.2vw, 21px); color: var(--spirit);
+  text-shadow: var(--outline); opacity: 1; transition: opacity 0.6s;
 }
 .hud-shards {
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  left: max(20px, env(safe-area-inset-left, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
   display: flex; flex-direction: column; gap: 6px;
 }
 .hud-shards .label {
-  font-family: var(--display); font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--mist);
+  font-family: var(--display); font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--ink); opacity: 0.85;
 }
 .hud-shards .row { display: flex; gap: 7px; align-items: center; }
 .shard-ico {
@@ -104,9 +113,9 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
 }
 .hud-map canvas { width: 100%; height: 100%; display: block; }
 .hud-help {
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  right: max(20px, env(safe-area-inset-right, 0px));
-  text-align: right; font-size: 15px; color: var(--mist); line-height: 1.5; transition: opacity 1.2s;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  text-align: right; font-size: 15px; color: var(--ink); line-height: 1.5; transition: opacity 1.2s;
 }
 .hud-help kbd {
   font-family: var(--display); font-size: 11px; color: var(--ink);
@@ -114,9 +123,10 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
 }
 .toast {
   position: fixed; left: 50%; top: 22%; transform: translateX(-50%);
-  z-index: 3; pointer-events: none; text-align: center; width: min(90vw, 640px);
+  z-index: 3; pointer-events: none; text-align: center; width: max-content; max-width: min(90vw, 640px);
+  padding: 14px 22px 16px; border-radius: 14px;
   font-family: var(--display); font-size: clamp(18px, 3.4vw, 30px); letter-spacing: 0.2em; color: var(--ink);
-  text-shadow: 0 0 24px rgba(143, 243, 255, 0.55), 0 0 2px #000;
+  text-shadow: var(--outline), 0 0 20px rgba(143, 243, 255, 0.4);
   opacity: 0; transition: opacity 1.2s;
 }
 .toast small {
@@ -167,7 +177,7 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
 .is-touch .hud-help { display: none; }
 #joy {
   position: fixed; z-index: 4; width: 132px; height: 132px; border-radius: 50%; touch-action: none;
-  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   left: max(20px, env(safe-area-inset-left, 0px));
   border: 1px solid var(--line); background: radial-gradient(circle, rgba(143, 243, 255, 0.08), var(--panel) 70%);
 }
@@ -185,7 +195,7 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
 .acts button:active, .acts button.on { background: rgba(143, 243, 255, 0.25); }
 .acts {
   position: fixed; z-index: 4; display: flex; flex-direction: column; gap: 12px;
-  bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(92px + env(safe-area-inset-bottom, 0px));
   right: max(16px, env(safe-area-inset-right, 0px));
 }
 .acts button { width: 72px; height: 72px; border-radius: 50%; font-size: 12px; letter-spacing: 0.1em; }
@@ -205,7 +215,8 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
   .acts { bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
   .acts button { width: 62px; height: 62px; }
   .hud-title .zone { display: none; }
-  .is-touch .hud-shards { top: calc(44px + env(safe-area-inset-top, 0px)); bottom: auto; }
+  .is-touch .hud-shards { top: calc(62px + env(safe-area-inset-top, 0px)); bottom: auto; }
+  .toast { top: 18%; }
 }
 @media (prefers-reduced-motion: reduce) {
   #intro, .toast, .hud-help { transition: none; }
@@ -365,6 +376,7 @@ scene.background = new THREE.Color(0x07080f);
 scene.fog = new THREE.Fog(FOG, 95, 175);
 
 let viewSize = 30;
+let shadowLight = null; // la lumière principale, une fois créée (fitCamera ajuste sa zone d'ombre)
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 500);
 const CAM_DIST = 100;
 const camOffset = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(CAM_DIST);
@@ -373,6 +385,13 @@ function fitCamera() {
   camera.left = -viewSize * a / 2; camera.right = viewSize * a / 2;
   camera.top = viewSize / 2; camera.bottom = -viewSize / 2;
   camera.updateProjectionMatrix();
+  // Zone d'ombre ajustée au champ visible : sur un téléphone en portrait elle est deux fois plus petite,
+  // donc deux fois moins d'arbres à redessiner dans la carte d'ombre à chaque image.
+  if (shadowLight) {
+    const half = Math.min(45, 0.5 * viewSize * Math.max(1, a) + 0.4 * viewSize);
+    Object.assign(shadowLight.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+    shadowLight.shadow.camera.updateProjectionMatrix();
+  }
 }
 fitCamera();
 
@@ -383,6 +402,8 @@ const moon = new THREE.DirectionalLight(0xa9bcff, 1.6);
 moon.castShadow = true;
 moon.shadow.mapSize.set(2048, 2048);
 Object.assign(moon.shadow.camera, { left: -38, right: 38, top: 38, bottom: -38, near: 1, far: 200 });
+shadowLight = moon;
+fitCamera();
 moon.shadow.bias = -0.0006;
 moon.shadow.normalBias = 0.04;
 scene.add(moon, moon.target);
@@ -397,6 +418,13 @@ scene.add(aura);
 const SIZE = R * 2.4, NCH = 12, CSEG = 30, N = NCH * CSEG, STEP = SIZE / N, CHUNK = SIZE / NCH;
 const HGRID = new Float32Array((N + 1) * (N + 1));
 for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) HGRID[j * (N + 1) + i] = H(-SIZE / 2 + i * STEP, -SIZE / 2 + j * STEP);
+// Densité de forêt sur la même grille : l'herbe et la mini-carte la lisent au lieu de recalculer le bruit.
+const FDGRID = new Float32Array((N + 1) * (N + 1));
+for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) FDGRID[j * (N + 1) + i] = FD(-SIZE / 2 + i * STEP, -SIZE / 2 + j * STEP);
+function fdAt(x, z) {
+  const i = Math.min(N, Math.max(0, Math.round((x + SIZE / 2) / STEP))), j = Math.min(N, Math.max(0, Math.round((z + SIZE / 2) / STEP)));
+  return FDGRID[j * (N + 1) + i];
+}
 function groundH(x, z) {
   const fx = (x + SIZE / 2) / STEP, fz = (z + SIZE / 2) / STEP;
   const i = Math.floor(fx), j = Math.floor(fz);
@@ -638,7 +666,7 @@ function materialRole(name) {
   return 'leaf';
 }
 const grassUniforms = { uTime: { value: 0 } };
-const grass = { meshes: [], cell: 1.7, radius: isTouch ? 26 : 38, cx: null, cz: null };
+const grass = { meshes: [], cell: 1.7, radius: isTouch ? 22 : 38, cx: null, cz: null };
 let natureLoaded = false;
 
 // Instances d'un modèle (une instance par emplacement), découpées par bloc ; chaque sous-maillage garde son matériau.
@@ -656,16 +684,17 @@ function hash2(i, j, k) { let h = (i * 374761393 + j * 668265263 + k * 144269504
 function updateGrass(force = false) {
   if (!grass.meshes.length) return;
   const cx = Math.floor(W.x / grass.cell), cz = Math.floor(W.z / grass.cell);
-  if (!force && cx === grass.cx && cz === grass.cz) return;
+  // On ne recalcule qu'après 3 cases de déplacement ; le rayon a une marge de 3 cases pour que rien n'apparaisse à l'écran.
+  if (!force && grass.cx !== null && Math.abs(cx - grass.cx) < 3 && Math.abs(cz - grass.cz) < 3) return;
   grass.cx = cx; grass.cz = cz;
-  const rc = Math.ceil(grass.radius / grass.cell), counts = grass.meshes.map(() => 0);
+  const rc = Math.ceil(grass.radius / grass.cell) + 3, counts = grass.meshes.map(() => 0);
   for (let i = -rc; i <= rc; i++) for (let j = -rc; j <= rc; j++) {
     if (i * i + j * j > rc * rc) continue;
     const ix = cx + i, iz = cz + j;
     const r1 = hash2(ix, iz, 1), r2 = hash2(ix, iz, 2), r3 = hash2(ix, iz, 3), r4 = hash2(ix, iz, 4);
     const x = (ix + r1) * grass.cell, z = (iz + r2) * grass.cell, h = groundH(x, z);
     if (h < 0.35 || h > 6.5 || x * x + z * z < 121) continue; // pas d'herbe dans le Cercle
-    if (r3 > (FD(x, z) > 0.08 ? 0.35 : 0.85)) continue;
+    if (r3 > (fdAt(x, z) > 0.08 ? 0.35 : 0.85)) continue;
     const v = Math.floor(r4 * grass.meshes.length * 0.999), g = grass.meshes[v];
     if (counts[v] >= g.max) continue;
     dummy.position.set(x, h - 0.05, z); dummy.rotation.set(0, r1 * 6.28, 0); dummy.scale.setScalar(0.4 + r2 * 0.4); dummy.updateMatrix();
@@ -708,7 +737,7 @@ const natureReady = new GLTFLoader().loadAsync('assets/nature.glb').then(gltf =>
     addModelInstances(tpl[name], items, { cast: tree || !!cast[name], receive: !/Pebble/.test(name) });
   }
   // Herbe autour du loup
-  const perVariant = isTouch ? 700 : 1500;
+  const perVariant = isTouch ? 900 : 1800;
   for (const name of ['Grass_Common_Short', 'Grass_Wispy_Short', 'Grass_Common_Tall']) {
     if (!tpl[name]) continue;
     tpl[name].updateMatrixWorld(true);
@@ -725,6 +754,8 @@ const natureReady = new GLTFLoader().loadAsync('assets/nature.glb').then(gltf =>
   setAlphaToCoverage(QUALITY[qLevel].msaa > 0);
   applyAmbience(dayK);
   updateGrass(true);
+  precompile();
+  warmUp();
 }).catch(err => console.warn('Décor nature indisponible :', err));
 
 /* ---------- Cercle des Pierres Anciennes ---------- */
@@ -1076,6 +1107,24 @@ function spawnAnimal(sp, tpl, clips, scale, minY, x, z) {
   mixer.update(arand() * 3); // désynchronise les animaux d'un même troupeau
   animals.push(a);
 }
+// Compile d'avance les shaders de tout ce qui est chargé (animaux cachés compris), au lieu de le faire
+// au moment où un nouvel élément entre dans le champ : c'était une source d'à-coups pendant les déplacements.
+function precompile() {
+  const hidden = animals.filter(a => !a.root.visible);
+  for (const a of hidden) a.root.visible = true;
+  try { renderer.compile(scene, camera); } catch (e) { console.warn(e); }
+  for (const a of hidden) a.root.visible = false;
+}
+// Pendant l'écran d'accueil : un rendu de tout le décor dans une cible minuscule, sans culling, pour envoyer
+// d'avance au GPU textures, instances et shaders d'ombre. Sinon chaque bloc découvert en marchant coûte un à-coup.
+function warmUp() {
+  const culled = [];
+  scene.traverse(o => { if (o.isInstancedMesh && o.frustumCulled) { o.frustumCulled = false; culled.push(o); } });
+  const rt = new THREE.WebGLRenderTarget(4, 4);
+  try { renderer.setRenderTarget(rt); renderer.render(scene, camera); } catch (e) { console.warn(e); }
+  renderer.setRenderTarget(null); rt.dispose();
+  for (const o of culled) o.frustumCulled = true;
+}
 async function loadAnimals() {
   for (const sp of SPECIES) {
     let gltf;
@@ -1099,6 +1148,7 @@ async function loadAnimals() {
     }
     await new Promise(r => setTimeout(r, 0)); // laisse respirer l'affichage entre deux espèces
   }
+  precompile();
 }
 // Avance dans la direction voulue, ou contourne l'obstacle en déviant de plus en plus.
 function moveAnimal(a, dx, dz, dist) {
@@ -1409,6 +1459,7 @@ function zoneName(x, z) {
   if (FD(x, z) > 0.08) return 'Forêt des Ombres';
   return 'Clairières Sauvages';
 }
+let zoneCheck = 0, zoneNow = '';
 let curZone = zoneName(W.x, W.z), zoneCand = curZone, zoneT = 0;
 
 /* ---------- Mini-carte ---------- */
@@ -1422,7 +1473,7 @@ function makeMapBase(day) {
     let c;
     if (h < 0) c = day ? [56, 150, 200] : [18, 38, 66];
     else if (h > MAX_WALK_H) { const k = Math.min(1, (h - MAX_WALK_H) / 25); c = day ? [150 + k * 90, 142 + k * 100, 125 + k * 110] : [60 + k * 70, 60 + k * 74, 74 + k * 84]; }
-    else { const f = smooth(-0.06, 0.18, FD(wx, wz)); c = day ? [lerp(130, 60, f), lerp(196, 138, f), lerp(80, 52, f)] : [lerp(58, 22, f), lerp(76, 40, f), lerp(56, 34, f)]; }
+    else { const f = smooth(-0.06, 0.18, FDGRID[j * (N + 1) + i]); c = day ? [lerp(130, 60, f), lerp(196, 138, f), lerp(80, 52, f)] : [lerp(58, 22, f), lerp(76, 40, f), lerp(56, 34, f)]; }
     img.data.set([c[0], c[1], c[2], 255], (j * (N + 1) + i) * 4);
   }
   x.putImageData(img, 0, 0);
@@ -1636,7 +1687,8 @@ function updateWorld(dt, t) {
   } else finalBeam.material.opacity = THREE.MathUtils.lerp(finalBeam.material.opacity, awakened ? 0.12 + Math.sin(t * 2) * 0.04 : 0, 0.03);
 
   // Zone
-  const z = zoneName(W.x, W.z);
+  if ((zoneCheck -= dt) <= 0) { zoneCheck = 0.25; zoneNow = zoneName(W.x, W.z); }
+  const z = zoneNow;
   if (z !== zoneCand) { zoneCand = z; zoneT = 0; }
   else if (z !== curZone && (zoneT += dt) > 0.6) { curZone = z; zoneEl.style.opacity = 0; setTimeout(() => { zoneEl.textContent = z; zoneEl.style.opacity = 0.85; }, 500); }
 
@@ -1659,7 +1711,7 @@ function updateWorld(dt, t) {
 }
 
 /* ---------- Caméra & post-traitement ---------- */
-const camTarget = new THREE.Vector3(W.x, W.y, W.z);
+const camTarget = new THREE.Vector3(W.x, W.y, W.z), camGoal = new THREE.Vector3(), shakeV = new THREE.Vector3();
 // Anticrénelage : le rendu passe par des cibles multi-échantillonnées (MSAA), car l'option antialias
 // du canvas ne s'applique pas au rendu en plusieurs passes. Sans MSAA (qualité basse), un filtre FXAA prend le relais.
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 }));
@@ -1719,6 +1771,7 @@ function updateAmbience(dt) {
 const QUALITY = [
   { pr: Math.min(devicePixelRatio, 2), shadow: 2048, bloom: 1, msaa: 4 },
   { pr: Math.min(devicePixelRatio, 1.25), shadow: 1024, bloom: 0.5, msaa: 4 },
+  { pr: Math.min(devicePixelRatio, 1), shadow: 1024, bloom: 0.5, msaa: 4 },
   { pr: Math.min(devicePixelRatio, 1), shadow: 1024, bloom: 0, msaa: 0 },
   { pr: Math.min(devicePixelRatio, 0.75), shadow: 512, bloom: 0, msaa: 0 },
 ];
@@ -1752,17 +1805,17 @@ function monitorPerf(raw) {
   if (perfT < 2) return;
   const avg = perfT / perfFrames * 1000;
   perfT = 0; perfFrames = 0;
-  if (avg > 25 && qLevel < QUALITY.length - 1) { qLevel++; perfGood = 0; applyQuality(); }
-  else if (avg < 15 && qLevel > qStart) { if (++perfGood >= 3) { qLevel--; perfGood = 0; applyQuality(); } }
+  if (avg > 20 && qLevel < QUALITY.length - 1) { qLevel++; perfGood = 0; applyQuality(); }
+  else if (avg < 13 && qLevel > qStart) { if (++perfGood >= 3) { qLevel--; perfGood = 0; applyQuality(); } }
   else perfGood = 0;
 }
 applyQuality();
 addEventListener('resize', applyQuality);
 
 function placeCamera(k) {
-  camTarget.lerp(new THREE.Vector3(W.x, W.y + 1, W.z), k);
+  camTarget.lerp(camGoal.set(W.x, W.y + 1, W.z), k);
   camera.position.copy(camTarget).add(camOffset);
-  if (shake > 0) camera.position.add(new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake));
+  if (shake > 0) camera.position.add(shakeV.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake));
   camera.lookAt(camTarget);
   moon.position.copy(camTarget).add(moonOffset); moon.target.position.copy(camTarget);
   aura.position.set(W.x + 2, W.y + 6, W.z + 2);
@@ -1770,7 +1823,7 @@ function placeCamera(k) {
 placeCamera(1);
 
 const clock = new THREE.Clock();
-let elapsed = 0, introSpin = 0;
+let elapsed = 0, introSpin = 0, mapClock = 0;
 function frame() {
   const raw = clock.getDelta(), dt = Math.min(raw, 0.05);
   monitorPerf(raw);
@@ -1790,7 +1843,7 @@ function frame() {
   shake = Math.max(0, shake - dt * 0.6);
   placeCamera(1 - Math.pow(0.0015, dt));
   composer.render();
-  if (started) drawMap(elapsed);
+  if (started && (mapClock -= dt) <= 0) { mapClock = 0.1; drawMap(elapsed); }
   requestAnimationFrame(frame);
 }
 drawMap(0);
