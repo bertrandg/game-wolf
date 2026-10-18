@@ -6,6 +6,43 @@ Au flanc est du Mont des Hiboux, une arche entourée de torches mène à la **Gr
 
 **Jouer en ligne :** https://bertrandg.github.io/game-wolf/
 
+## Captures d'écran
+
+Prises en format téléphone (Pixel 9a), avec les commandes tactiles.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/nuit-foret.jpg" width="260" alt="La nuit, un éclat de lune dans la Forêt des Ombres"></td>
+    <td><img src="docs/screenshots/nuit-hurlement.jpg" width="260" alt="Hurlement au bord du Lac des Murmures"></td>
+    <td><img src="docs/screenshots/entree-grotte.jpg" width="260" alt="L’entrée de la Grotte des Anciens"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>La nuit, un éclat de lune dans la Forêt des Ombres</sub></td>
+    <td align="center"><sub>Hurlement au bord du Lac des Murmures</sub></td>
+    <td align="center"><sub>L’entrée de la Grotte des Anciens</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/grotte-hall.jpg" width="260" alt="Hall des Racines, sous la montagne"></td>
+    <td><img src="docs/screenshots/grotte-bassin.jpg" width="260" alt="Bassin d’Émeraude"></td>
+    <td><img src="docs/screenshots/grotte-crypte.jpg" width="260" alt="Crypte des Anciens"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Hall des Racines, sous la montagne</sub></td>
+    <td align="center"><sub>Bassin d’Émeraude</sub></td>
+    <td align="center"><sub>Crypte des Anciens</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/grotte-coeur.jpg" width="260" alt="Cœur de la Montagne"></td>
+    <td><img src="docs/screenshots/jour-cercle.jpg" width="260" alt="Le jour, au Cercle des Pierres Anciennes"></td>
+    <td><img src="docs/screenshots/jour-grotte.jpg" width="260" alt="L’entrée de la grotte en plein jour"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Cœur de la Montagne</sub></td>
+    <td align="center"><sub>Le jour, au Cercle des Pierres Anciennes</sub></td>
+    <td align="center"><sub>L’entrée de la grotte en plein jour</sub></td>
+  </tr>
+</table>
+
 ## Commandes
 
 | Touche | Action |
