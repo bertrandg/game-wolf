@@ -696,7 +696,7 @@ scene.add(wolf.root);
 /* ---------- Loup animé (modèle Quaternius, CC0) ---------- */
 // Le loup simplifié reste affiché tant que le modèle charge, et sert de secours s'il échoue.
 const WOLF_LEN = 3.0;
-const WALK_TS = 1.5, RUN_TS = 1.15;
+const WALK_TS = 1.5, RUN_TS = 1.15, JUMP_TS = 0.6;
 let rig = null;
 new GLTFLoader().load('assets/wolf.gltf', gltf => {
   const model = gltf.scene;
@@ -726,7 +726,7 @@ new GLTFLoader().load('assets/wolf.gltf', gltf => {
   const act = n => mixer.clipAction(THREE.AnimationClip.findByName(gltf.animations, n));
   const actions = { idle: act('Idle'), idle2: act('Idle_2'), walk: act('Walk'), run: act('Gallop'), jump: act('Gallop_Jump') };
   for (const a of [actions.jump, actions.idle2]) { a.setLoop(THREE.LoopOnce); a.clampWhenFinished = true; }
-  actions.walk.timeScale = WALK_TS; actions.run.timeScale = RUN_TS; actions.jump.timeScale = 1.25;
+  actions.walk.timeScale = WALK_TS; actions.run.timeScale = RUN_TS; actions.jump.timeScale = JUMP_TS;
   const bones = {};
   model.traverse(o => { if (o.isBone) bones[o.name] = o; });
   wolf.model.visible = false;
