@@ -110,6 +110,7 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
   width: 168px; height: 168px; border-radius: 50%;
   border: 1px solid var(--line); box-shadow: 0 0 30px rgba(0, 0, 0, 0.6), inset 0 0 24px rgba(0, 0, 0, 0.8);
   overflow: hidden; background: var(--panel);
+  pointer-events: auto; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
 }
 .hud-map canvas { width: 100%; height: 100%; display: block; }
 .hud-help {
@@ -1599,6 +1600,25 @@ function collect(s) {
     toast(isDay ? 'Les pierres brûlent de soleil' : 'Les pierres s’éveillent', 'Retourne au Cercle des Pierres Anciennes.', 5000);
     playChime(true);
   } else toast(`${K.name} ${collected} / ${CRYSTAL_N}`, (isDay ? DAY_MSGS : NIGHT_MSGS)[collected - 1] || '', 3000);
+}
+
+/* ---------- Code secret : 10 clics rapides sur la mini-carte ---------- */
+// Récolte d'un coup tous les cristaux restants du cycle en cours (lune ou soleil) ; il ne reste qu'à rejoindre le Cercle.
+{
+  let taps = 0, lastTap = 0;
+  document.querySelector('.hud-map').addEventListener('click', () => {
+    const now = performance.now();
+    taps = now - lastTap < 600 ? taps + 1 : 1;
+    lastTap = now;
+    if (taps < 10) return;
+    taps = 0;
+    const left = shards.filter(s => !s.taken);
+    if (!started || trans || !left.length) return;
+    for (const s of left.slice(0, -1)) { s.taken = true; collected++; scene.remove(s.g); }
+    shockRing(W.x, W.y, W.z, isDay ? 0xffd27a : 0x9ff6ff, 18, 1.6);
+    burst(W.x, W.y + 1.5, W.z, KINDS[isDay ? 'sun' : 'moon'].burst, 90);
+    collect(left[left.length - 1]); // le dernier passe par la collecte normale : runes, son, message, Cercle éveillé
+  });
 }
 
 /* ---------- Bascule jour / nuit ---------- */
