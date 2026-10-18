@@ -205,12 +205,12 @@ body {
   <div class="intro-card">
     <div class="intro-moon"></div>
     <h2>Le Loup des Terres Sauvages</h2>
-    <p>La lune s'est brisée au-dessus des clairières. Ses <em>sept éclats</em> sont tombés entre forêts, lacs et montagnes. Rapporte leur lumière au Cercle des Pierres Anciennes.</p>
+    <p>La lune s'est brisée au-dessus des clairières. Ses <em>neuf éclats</em> sont tombés entre forêts, lacs et montagnes. Rapporte leur lumière au Cercle des Pierres Anciennes.</p>
     <div class="controls">
       <kbd>Z Q S D · flèches</kbd><span>se déplacer</span>
       <kbd>Espace</kbd><span>sauter</span>
       <kbd>Maj</kbd><span>courir</span>
-      <kbd>H</kbd><span>hurler à la lune</span>
+      <kbd>H</kbd><span>hurler (fait fuir les bêtes)</span>
     </div>
     <button id="start" disabled>Le monde se forme…</button>
   </div>
@@ -230,6 +230,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 if (isTouch) document.documentElement.classList.add('is-touch');
@@ -253,25 +254,33 @@ const clamp01 = t => t < 0 ? 0 : t > 1 ? 1 : t;
 const smooth = (e0, e1, x) => { const t = clamp01((x - e0) / (e1 - e0)); return t * t * (3 - 2 * t); };
 
 /* ---------- Géographie ---------- */
-const R = 150;
+const R = 300;
 const LAKES = [
-  { x: -58, z: 34, r: 30, name: 'Lac des Murmures' },
-  { x: 64, z: 60, r: 20, name: 'Étang de Brume' },
-  { x: -22, z: -58, r: 15, name: 'Mare aux Lucioles' },
+  { x: -116, z: 68, r: 42, name: 'Lac des Murmures' },
+  { x: 110, z: 100, r: 26, name: 'Étang de Brume' },
+  { x: -44, z: -116, r: 20, name: 'Mare aux Lucioles' },
+  { x: 135, z: -20, r: 34, name: 'Lac Noir' },
+  { x: -150, z: -70, r: 30, name: 'Lac des Saules' },
+  { x: 20, z: 160, r: 24, name: 'Lac de Lune' },
 ];
-const PEAK = { x: 58, z: -62, r: 36, name: 'Pic du Corbeau' };
+const PEAKS = [
+  { x: 116, z: -130, r: 58, name: 'Pic du Corbeau' },
+  { x: 70, z: 55, r: 36, name: 'Mont des Hiboux' },
+];
 const CIRCLE_R = 9;
 const MAX_WALK_H = 6.8, MIN_WALK_H = -0.8;
 
-function edgeRadius(x, z) { const a = Math.atan2(z, x); return R * 0.8 + fbm(Math.cos(a) * 1.6 + 5, Math.sin(a) * 1.6 + 5, 3) * 34; }
+function edgeRadius(x, z) { const a = Math.atan2(z, x); return R * 0.8 + fbm(Math.cos(a) * 1.6 + 5, Math.sin(a) * 1.6 + 5, 3) * 68; }
 function H(x, z) {
   let h = 1.7 + fbm(x * 0.012, z * 0.012, 4) * 6 + fbm(x * 0.05 + 31, z * 0.05 - 17, 3) * 1.2;
   const r = Math.hypot(x, z);
   const e = edgeRadius(x, z);
-  const t = smooth(e - 24, e + 8, r);
+  const t = smooth(e - 40, e + 12, r);
   if (t > 0) h += t * t * (30 + ridged(x * 0.03, z * 0.03, 4) * 26);
-  const dp = Math.hypot(x - PEAK.x, z - PEAK.z) / PEAK.r;
-  if (dp < 1.3) { const k = smooth(1.25, 0, dp); h += k * k * (24 + ridged(x * 0.05 + 9, z * 0.05, 4) * 16); }
+  for (const P of PEAKS) {
+    const dp = Math.hypot(x - P.x, z - P.z) / P.r;
+    if (dp < 1.3) { const k = smooth(1.25, 0, dp); h += k * k * (24 + ridged(x * 0.05 + 9, z * 0.05, 4) * 16); }
+  }
   for (const L of LAKES) {
     const d = Math.hypot(x - L.x, z - L.z) / (L.r * (1 + fbm(x * 0.04, z * 0.04, 2) * 0.4));
     if (d < 1.1) { const s = smooth(1.05, 0.4, d); h = h * (1 - s) + -3.2 * s; }
@@ -324,24 +333,31 @@ const aura = new THREE.PointLight(0x7fa8ff, 18, 28, 1.2);
 scene.add(aura);
 
 /* ---------- Terrain ---------- */
-const SIZE = R * 2.4, SEG = 230;
+// Le relief est échantillonné une fois sur une grille ; le jeu lit ensuite la hauteur dans cette grille
+// (groundH), bien plus vite que de recalculer le bruit, et exactement comme le maillage affiché.
+const SIZE = R * 2.4, NCH = 12, CSEG = 30, N = NCH * CSEG, STEP = SIZE / N, CHUNK = SIZE / NCH;
+const HGRID = new Float32Array((N + 1) * (N + 1));
+for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) HGRID[j * (N + 1) + i] = H(-SIZE / 2 + i * STEP, -SIZE / 2 + j * STEP);
+function groundH(x, z) {
+  const fx = (x + SIZE / 2) / STEP, fz = (z + SIZE / 2) / STEP;
+  const i = Math.floor(fx), j = Math.floor(fz);
+  if (i < 0 || j < 0 || i >= N || j >= N) return 50;
+  const u = fx - i, v = fz - j, k = j * (N + 1) + i;
+  const h00 = HGRID[k], h10 = HGRID[k + 1], h01 = HGRID[k + N + 1], h11 = HGRID[k + N + 2];
+  return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
+}
+// Le terrain est découpé en 12 × 12 blocs : seuls ceux dans le champ de la caméra sont dessinés.
 {
-  const g0 = new THREE.PlaneGeometry(SIZE, SIZE, SEG, SEG);
-  g0.rotateX(-Math.PI / 2);
-  const pa = g0.attributes.position;
-  for (let i = 0; i < pa.count; i++) pa.setY(i, H(pa.getX(i), pa.getZ(i)));
-  const g = g0.toNonIndexed();
-  g0.dispose();
-  const p = g.attributes.position.array;
-  const cols = new Float32Array(p.length);
+  const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 });
   const C = {
     deep: new THREE.Color(0x0e1418), mud: new THREE.Color(0x34332a), clear: new THREE.Color(0x3d5036),
     forest: new THREE.Color(0x1c2a22), heather: new THREE.Color(0x4a3656), rock: new THREE.Color(0x4b4a58),
     rock2: new THREE.Color(0x37363f), snow: new THREE.Color(0xaab3cb), moss: new THREE.Color(0x2d4a40),
   };
   const c = new THREE.Color(), tmp = new THREE.Color();
-  for (let i = 0; i < p.length; i += 9) {
-    const ax = p[i], ay = p[i + 1], az = p[i + 2], bx = p[i + 3], by = p[i + 4], bz = p[i + 5], cx = p[i + 6], cy = p[i + 7], cz = p[i + 8];
+  let p, cols, o;
+  function tri(ax, ay, az, bx, by, bz, cx, cy, cz) {
+    p.set([ax, ay, az, bx, by, bz, cx, cy, cz], o);
     const mx = (ax + bx + cx) / 3, my = (ay + by + cy) / 3, mz = (az + bz + cz) / 3;
     const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
     const nx = uy * vz - uz * vy, ny0 = uz * vx - ux * vz, nz = ux * vy - uy * vx;
@@ -358,13 +374,43 @@ const SIZE = R * 2.4, SEG = 230;
       if (my > 19) c.lerp(C.snow, smooth(19, 30, my) * smooth(0.45, 0.8, ny));
     }
     c.multiplyScalar(0.9 + rand() * 0.18);
-    for (let k = 0; k < 3; k++) { cols[i + k * 3] = c.r; cols[i + k * 3 + 1] = c.g; cols[i + k * 3 + 2] = c.b; }
+    for (let k = 0; k < 3; k++) { cols[o + k * 3] = c.r; cols[o + k * 3 + 1] = c.g; cols[o + k * 3 + 2] = c.b; }
+    o += 9;
   }
-  g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-  g.computeVertexNormals();
-  const terrain = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0 }));
-  terrain.receiveShadow = true;
-  scene.add(terrain);
+  for (let cj = 0; cj < NCH; cj++) for (let ci = 0; ci < NCH; ci++) {
+    p = new Float32Array(CSEG * CSEG * 18); cols = new Float32Array(CSEG * CSEG * 18); o = 0;
+    for (let j = cj * CSEG; j < (cj + 1) * CSEG; j++) for (let i = ci * CSEG; i < (ci + 1) * CSEG; i++) {
+      const x0 = -SIZE / 2 + i * STEP, z0 = -SIZE / 2 + j * STEP, x1 = x0 + STEP, z1 = z0 + STEP, k = j * (N + 1) + i;
+      const h00 = HGRID[k], h10 = HGRID[k + 1], h01 = HGRID[k + N + 1], h11 = HGRID[k + N + 2];
+      tri(x0, h00, z0, x0, h01, z1, x1, h10, z0);
+      tri(x1, h10, z0, x0, h01, z1, x1, h11, z1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+    const m = new THREE.Mesh(g, terrainMat);
+    m.receiveShadow = true;
+    scene.add(m);
+  }
+}
+
+// Regroupe des instances par bloc de terrain pour que le culling de la caméra (et de l'ombre) écarte les blocs hors champ.
+function addChunkedInstances(geo, mat, items, { cast = false, receive = false, color = false } = {}) {
+  const buckets = new Map();
+  for (const it of items) {
+    const k = Math.floor((it.x + SIZE / 2) / CHUNK) * 1000 + Math.floor((it.z + SIZE / 2) / CHUNK);
+    let b = buckets.get(k); if (!b) buckets.set(k, b = []);
+    b.push(it);
+  }
+  for (const list of buckets.values()) {
+    const m = new THREE.InstancedMesh(geo, mat, list.length);
+    list.forEach((it, i) => { m.setMatrixAt(i, it.m); if (color) m.setColorAt(i, it.c); });
+    m.computeBoundingSphere();
+    m.castShadow = cast; m.receiveShadow = receive;
+    scene.add(m);
+  }
 }
 
 /* ---------- Eau ---------- */
@@ -376,7 +422,7 @@ function rippleTexture() {
     x.strokeStyle = `rgba(255,255,255,${0.15 + rand() * 0.5})`; x.lineWidth = 1;
     x.beginPath(); x.moveTo(px, py); x.lineTo(px + w, py); x.stroke();
   }
-  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(40, 40);
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(80, 80);
   return t;
 }
 const waterTex = rippleTexture();
@@ -415,34 +461,24 @@ const dummy = new THREE.Object3D();
   ]);
   const trunk = new THREE.CylinderGeometry(0.16, 0.26, 1.6, 6).translate(0, 0.8, 0);
   const pts = [];
-  for (let i = 0; i < 16000 && pts.length < 4200; i++) {
+  for (let i = 0; i < 70000 && pts.length < 11000; i++) {
     const x = (rand() * 2 - 1) * R * 1.1, z = (rand() * 2 - 1) * R * 1.1;
     if (Math.hypot(x, z) < 22) continue;
-    const h = H(x, z); if (h < 0.5 || h > 17) continue;
-    let prob = smooth(-0.06, 0.18, FD(x, z)) * 0.92 + 0.025;
+    const h = groundH(x, z); if (h < 0.5 || h > 17) continue;
+    let prob = smooth(-0.06, 0.18, FD(x, z)) * 0.68 + 0.015;
     if (h > 7) prob *= 0.55;
     if (rand() > prob) continue;
     if (hitObs(x, z, h, 1.9)) continue;
     const s = 0.75 + rand() * 0.8;
-    pts.push({ x, z, h, s });
+    dummy.position.set(x, h - 0.1, z);
+    dummy.rotation.set((rand() - 0.5) * 0.08, rand() * 6.28, (rand() - 0.5) * 0.08);
+    dummy.scale.set(s, s * (0.9 + rand() * 0.4), s);
+    dummy.updateMatrix();
+    pts.push({ x, z, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(0.42 + rand() * 0.12, 0.25 + rand() * 0.15, 0.09 + rand() * 0.06) });
     addObs(x, z, 0.32 * s, h + 30);
   }
-  const fMat = new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 });
-  const tMat = new THREE.MeshStandardMaterial({ color: 0x2b221d, flatShading: true, roughness: 1 });
-  const fm = new THREE.InstancedMesh(foliage, fMat, pts.length);
-  const tm = new THREE.InstancedMesh(trunk, tMat, pts.length);
-  const col = new THREE.Color();
-  pts.forEach((p, i) => {
-    dummy.position.set(p.x, p.h - 0.1, p.z);
-    dummy.rotation.set((rand() - 0.5) * 0.08, rand() * 6.28, (rand() - 0.5) * 0.08);
-    dummy.scale.set(p.s, p.s * (0.9 + rand() * 0.4), p.s);
-    dummy.updateMatrix();
-    fm.setMatrixAt(i, dummy.matrix); tm.setMatrixAt(i, dummy.matrix);
-    col.setHSL(0.42 + rand() * 0.12, 0.25 + rand() * 0.15, 0.09 + rand() * 0.06);
-    fm.setColorAt(i, col);
-  });
-  fm.castShadow = tm.castShadow = true; fm.receiveShadow = true;
-  scene.add(fm, tm);
+  addChunkedInstances(foliage, new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.9 }), pts, { cast: true, receive: true, color: true });
+  addChunkedInstances(trunk, new THREE.MeshStandardMaterial({ color: 0x2b221d, flatShading: true, roughness: 1 }), pts, { cast: true });
 }
 
 /* ---------- Arbres morts ---------- */
@@ -455,73 +491,58 @@ const dummy = new THREE.Object3D();
     new THREE.CylinderGeometry(0.03, 0.06, 1.1, 4).rotateZ(0.5).rotateX(-0.6).translate(0.2, 4.2, -0.35),
   ]);
   const pts = [];
-  for (let i = 0; i < 5000 && pts.length < 260; i++) {
+  for (let i = 0; i < 20000 && pts.length < 750; i++) {
     const x = (rand() * 2 - 1) * R, z = (rand() * 2 - 1) * R;
     if (Math.hypot(x, z) < 16) continue;
-    const h = H(x, z); if (h < 0.15 || h > 6) continue;
+    const h = groundH(x, z); if (h < 0.15 || h > 6) continue;
     if (FD(x, z) > 0.06 && rand() > 0.15) continue;
     if (hitObs(x, z, h, 2.2)) continue;
-    pts.push({ x, z, h, s: 0.7 + rand() * 0.7 });
+    dummy.position.set(x, h - 0.1, z);
+    dummy.rotation.set((rand() - 0.5) * 0.25, rand() * 6.28, (rand() - 0.5) * 0.25);
+    dummy.scale.setScalar(0.7 + rand() * 0.7); dummy.updateMatrix();
+    pts.push({ x, z, m: dummy.matrix.clone() });
     addObs(x, z, 0.28, h + 30);
   }
-  const m = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0x77707d, flatShading: true, roughness: 1 }), pts.length);
-  pts.forEach((p, i) => {
-    dummy.position.set(p.x, p.h - 0.1, p.z);
-    dummy.rotation.set((rand() - 0.5) * 0.25, rand() * 6.28, (rand() - 0.5) * 0.25);
-    dummy.scale.setScalar(p.s); dummy.updateMatrix(); m.setMatrixAt(i, dummy.matrix);
-  });
-  m.castShadow = true;
-  scene.add(m);
+  addChunkedInstances(geo, new THREE.MeshStandardMaterial({ color: 0x77707d, flatShading: true, roughness: 1 }), pts, { cast: true });
 }
 
 /* ---------- Rochers ---------- */
 {
   const pts = [];
-  for (let i = 0; i < 6000 && pts.length < 650; i++) {
+  for (let i = 0; i < 24000 && pts.length < 2400; i++) {
     const x = (rand() * 2 - 1) * R * 1.05, z = (rand() * 2 - 1) * R * 1.05;
     if (Math.hypot(x, z) < 14) continue;
-    const h = H(x, z); if (h < -1.5) continue;
+    const h = groundH(x, z); if (h < -1.5) continue;
     if (h < 6 && rand() > 0.45) continue;
     const s = 0.3 + Math.pow(rand(), 2) * 2.2;
     if (hitObs(x, z, h, s + 0.6)) continue;
-    pts.push({ x, z, h, s });
+    dummy.position.set(x, h + s * 0.25, z);
+    dummy.rotation.set(rand() * 3, rand() * 3, rand() * 3);
+    dummy.scale.set(s * (0.8 + rand() * 0.5), s * (0.6 + rand() * 0.4), s * (0.8 + rand() * 0.5));
+    dummy.updateMatrix();
+    pts.push({ x, z, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(0.68, 0.06, 0.2 + rand() * 0.1) });
     if (s > 0.55) addObs(x, z, s * 0.85, h + s * 0.9);
   }
-  const m = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.95 }), pts.length);
-  const col = new THREE.Color();
-  pts.forEach((p, i) => {
-    dummy.position.set(p.x, p.h + p.s * 0.25, p.z);
-    dummy.rotation.set(rand() * 3, rand() * 3, rand() * 3);
-    dummy.scale.set(p.s * (0.8 + rand() * 0.5), p.s * (0.6 + rand() * 0.4), p.s * (0.8 + rand() * 0.5));
-    dummy.updateMatrix(); m.setMatrixAt(i, dummy.matrix);
-    col.setHSL(0.68, 0.06, 0.2 + rand() * 0.1); m.setColorAt(i, col);
-  });
-  m.castShadow = m.receiveShadow = true;
-  scene.add(m);
+  addChunkedInstances(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, flatShading: true, roughness: 0.95 }), pts, { cast: true, receive: true, color: true });
 }
 
 /* ---------- Champignons luminescents ---------- */
 {
   const cap = new THREE.SphereGeometry(0.2, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2);
   const pts = [];
-  for (let c = 0; c < 4000 && pts.length < 700; c++) {
+  dummy.rotation.set(0, 0, 0);
+  for (let c = 0; c < 16000 && pts.length < 2400; c++) {
     const x = (rand() * 2 - 1) * R * 0.9, z = (rand() * 2 - 1) * R * 0.9;
-    const h = H(x, z); if (h < 0.4 || h > 6) continue;
+    const h = groundH(x, z); if (h < 0.4 || h > 6) continue;
     if (FD(x, z) < 0.05 && rand() > 0.2) continue;
     const n = 3 + Math.floor(rand() * 5), hue = rand() < 0.65 ? 0.5 : 0.76;
     for (let k = 0; k < n; k++) {
-      const px = x + (rand() - 0.5) * 2.4, pz = z + (rand() - 0.5) * 2.4;
-      pts.push({ x: px, z: pz, h: H(px, pz), s: 0.6 + rand() * 0.9, hue: hue + (rand() - 0.5) * 0.05 });
+      const px = x + (rand() - 0.5) * 2.4, pz = z + (rand() - 0.5) * 2.4, s = 0.6 + rand() * 0.9;
+      dummy.position.set(px, groundH(px, pz) + 0.12 * s, pz); dummy.scale.set(s, s * 0.8, s); dummy.updateMatrix();
+      pts.push({ x: px, z: pz, m: dummy.matrix.clone(), c: new THREE.Color().setHSL(hue + (rand() - 0.5) * 0.05, 1, 0.55).multiplyScalar(1.6) });
     }
   }
-  const m = new THREE.InstancedMesh(cap, new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), pts.length);
-  const col = new THREE.Color();
-  pts.forEach((p, i) => {
-    dummy.position.set(p.x, p.h + 0.12 * p.s, p.z); dummy.rotation.set(0, 0, 0);
-    dummy.scale.set(p.s, p.s * 0.8, p.s); dummy.updateMatrix(); m.setMatrixAt(i, dummy.matrix);
-    col.setHSL(p.hue, 1, 0.55); col.multiplyScalar(1.6); m.setColorAt(i, col);
-  });
-  scene.add(m);
+  addChunkedInstances(cap, new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), pts, { color: true });
 }
 
 /* ---------- Cercle des Pierres Anciennes ---------- */
@@ -532,7 +553,7 @@ const circleGroup = new THREE.Group();
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x2f2e3a, flatShading: true, roughness: 0.95 });
   const n = 7;
   for (let i = 0; i < n; i++) {
-    const a = i / n * Math.PI * 2, x = Math.cos(a) * CIRCLE_R, z = Math.sin(a) * CIRCLE_R, h = H(x, z);
+    const a = i / n * Math.PI * 2, x = Math.cos(a) * CIRCLE_R, z = Math.sin(a) * CIRCLE_R, h = groundH(x, z);
     const hgt = 3.2 + (i % 3) * 0.6;
     const g = new THREE.Group();
     g.position.set(x, h, z);
@@ -554,7 +575,7 @@ const circleGroup = new THREE.Group();
     circleGroup.add(g);
     addObs(x, z, 0.75, h + hgt);
   }
-  const h0 = H(0, 0);
+  const h0 = groundH(0, 0);
   const altar = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.6, 0.45, 7), stoneMat);
   altar.position.set(0, h0 + 0.1, 0); altar.castShadow = altar.receiveShadow = true;
   circleGroup.add(altar);
@@ -568,7 +589,7 @@ const finalBeam = new THREE.Mesh(
   new THREE.CylinderGeometry(1.4, 2.4, 120, 16, 1, true),
   new THREE.MeshBasicMaterial({ color: 0x9ff6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
 );
-finalBeam.position.set(0, H(0, 0) + 60, 0);
+finalBeam.position.set(0, groundH(0, 0) + 60, 0);
 scene.add(finalBeam);
 
 /* ---------- Textures lumineuses ---------- */
@@ -582,10 +603,9 @@ function glowTexture() {
 const glow = glowTexture();
 
 /* ---------- Feux follets ---------- */
-const WISP_N = 700;
-const wispBase = new Float32Array(WISP_N * 4);
-const wispGeo = new THREE.BufferGeometry();
-const wispPos = new Float32Array(WISP_N * 3), wispCol = new Float32Array(WISP_N * 3);
+// Le flottement est calculé par le GPU (shader) : aucun coût processeur par image, quel que soit leur nombre.
+const WISP_N = 2000;
+const wispPos = new Float32Array(WISP_N * 3), wispPhase = new Float32Array(WISP_N), wispCol = new Float32Array(WISP_N * 3);
 {
   const col = new THREE.Color();
   let i = 0;
@@ -593,17 +613,36 @@ const wispPos = new Float32Array(WISP_N * 3), wispCol = new Float32Array(WISP_N 
     const near = rand() < 0.35 ? LAKES[Math.floor(rand() * LAKES.length)] : null;
     const x = near ? near.x + (rand() - 0.5) * near.r * 2.4 : (rand() * 2 - 1) * R * 0.85;
     const z = near ? near.z + (rand() - 0.5) * near.r * 2.4 : (rand() * 2 - 1) * R * 0.85;
-    const h = Math.max(H(x, z), 0); if (h > 8) continue;
-    wispBase.set([x, h + 0.8 + rand() * 3.5, z, rand() * 100], i * 4);
+    const h = Math.max(groundH(x, z), 0); if (h > 8) continue;
+    wispPos.set([x, h + 0.8 + rand() * 3.5, z], i * 3);
+    wispPhase[i] = rand() * 100;
     const r = rand();
     col.setHSL(r < 0.5 ? 0.5 : r < 0.8 ? 0.33 : 0.77, 1, 0.65);
     wispCol.set([col.r, col.g, col.b], i * 3);
     i++;
   }
 }
+const wispGeo = new THREE.BufferGeometry();
 wispGeo.setAttribute('position', new THREE.BufferAttribute(wispPos, 3));
+wispGeo.setAttribute('phase', new THREE.BufferAttribute(wispPhase, 1));
 wispGeo.setAttribute('color', new THREE.BufferAttribute(wispCol, 3));
-const wisps = new THREE.Points(wispGeo, new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, map: glow, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+const wispMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uSize: { value: 9 * renderer.getPixelRatio() }, uMap: { value: glow } },
+  vertexShader: `
+    attribute float phase; attribute vec3 color; varying vec3 vColor;
+    uniform float uTime, uSize;
+    void main() {
+      vec3 p = position + vec3(sin(uTime * 0.3 + phase) * 2.2, sin(uTime * 0.9 + phase * 2.0) * 0.6, cos(uTime * 0.25 + phase) * 2.2);
+      vColor = color;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      gl_PointSize = uSize;
+    }`,
+  fragmentShader: `
+    uniform sampler2D uMap; varying vec3 vColor;
+    void main() { vec4 t = texture2D(uMap, gl_PointCoord); gl_FragColor = vec4(vColor * t.rgb, t.a); }`,
+  transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+});
+const wisps = new THREE.Points(wispGeo, wispMat);
 wisps.frustumCulled = false;
 scene.add(wisps);
 
@@ -621,8 +660,8 @@ scene.add(ash);
 {
   const mat = new THREE.SpriteMaterial({ map: glow, color: 0x7d88b8, transparent: true, opacity: 0.09, depthWrite: false });
   let n = 0;
-  for (let i = 0; i < 3000 && n < 90; i++) {
-    const x = (rand() * 2 - 1) * R * 0.85, z = (rand() * 2 - 1) * R * 0.85, h = H(x, z);
+  for (let i = 0; i < 9000 && n < 220; i++) {
+    const x = (rand() * 2 - 1) * R * 0.85, z = (rand() * 2 - 1) * R * 0.85, h = groundH(x, z);
     if (h > 1.4) continue;
     const s = new THREE.Sprite(mat); s.position.set(x, Math.max(h, 0) + 1.2, z); s.scale.setScalar(14 + rand() * 14);
     scene.add(s); n++;
@@ -630,13 +669,13 @@ scene.add(ash);
 }
 
 /* ---------- Éclats de lune ---------- */
-const SHARD_TARGETS = [[-26, 66], [84, 24], [18, -30], [-90, -14], [-52, -76], [8, 88], [40, -98]];
+const SHARD_TARGETS = [[-52, 132], [150, 50], [36, -60], [-170, 0], [-90, -140], [55, 170], [70, -180], [-60, -35], [80, 130]];
 function findSpot(tx, tz) {
   for (let rad = 0; rad < 45; rad += 1.5) for (let a = 0; a < 6.28; a += 0.35) {
-    const x = tx + Math.cos(a) * rad, z = tz + Math.sin(a) * rad, h = H(x, z);
+    const x = tx + Math.cos(a) * rad, z = tz + Math.sin(a) * rad, h = groundH(x, z);
     if (h > 0.4 && h < 5.2 && !hitObs(x, z, h, 1.6)) return { x, z, h };
   }
-  return { x: tx, z: tz, h: H(tx, tz) };
+  return { x: tx, z: tz, h: groundH(tx, tz) };
 }
 const shardGeo = new THREE.OctahedronGeometry(0.55, 0);
 const shardMat = new THREE.MeshBasicMaterial({ color: 0xd8f0ff, toneMapped: false });
@@ -698,7 +737,21 @@ scene.add(wolf.root);
 const WOLF_LEN = 3.0;
 const WALK_TS = 2.1, RUN_TS = 1.15, JUMP_TS = 0.6;
 let rig = null;
-new GLTFLoader().load('assets/wolf.gltf', gltf => {
+const gltfLoader = new GLTFLoader();
+// Boîte du modèle dans sa pose de repos, os appliqués (les modèles sont compressés, la géométrie brute ne suffit pas).
+function measureModel(model) {
+  model.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  model.traverse(o => {
+    if (!o.isMesh) return;
+    let b;
+    if (o.isSkinnedMesh) { o.skeleton.update(); o.computeBoundingBox(); b = o.boundingBox; }
+    else { o.geometry.computeBoundingBox(); b = o.geometry.boundingBox; }
+    box.union(b.clone().applyMatrix4(o.matrixWorld));
+  });
+  return box;
+}
+gltfLoader.load('assets/wolf.glb', gltf => {
   const model = gltf.scene;
   const eyeMat = new THREE.MeshBasicMaterial({ color: 0xa6fbff, toneMapped: false });
   model.traverse(o => {
@@ -715,10 +768,7 @@ new GLTFLoader().load('assets/wolf.gltf', gltf => {
     };
     o.material = Array.isArray(o.material) ? o.material.map(fix) : fix(o.material);
   });
-  // Taille mesurée sur la géométrie au repos : la boîte d'un maillage animé dépend de la pose courante.
-  const box = new THREE.Box3();
-  model.traverse(o => { if (o.isMesh) { o.geometry.computeBoundingBox(); box.union(o.geometry.boundingBox); } });
-  const size = box.getSize(new THREE.Vector3());
+  const box = measureModel(model), size = box.getSize(new THREE.Vector3());
   const s = WOLF_LEN / Math.max(size.x, size.z);
   model.scale.setScalar(s);
   model.position.y = -box.min.y * s;
@@ -759,7 +809,147 @@ function animateRig(dt, moving, run, howlK) {
   }
 }
 const HOWL_SIGN = 1;
-const W = { x: 0, z: 4.5, y: H(0, 4.5), vy: 0, ground: true, angle: Math.PI * 1.25, anim: 0, howl: 0, slide: 1 };
+const W = { x: 0, z: 4.5, y: groundH(0, 4.5), vy: 0, ground: true, angle: Math.PI * 1.25, anim: 0, howl: 0, slide: 1 };
+
+/* ---------- Animaux sauvages (pack Quaternius, CC0) ---------- */
+// height : hauteur visée en unités du monde (le loup fait environ 1,5). herd : taille des groupes.
+const SPECIES = [
+  { file: 'deer', height: 2.0, count: 16, herd: 4, walk: 2.4, run: 13, clearing: true },
+  { file: 'stag', height: 2.7, count: 6, herd: 2, walk: 2.4, run: 13, clearing: true },
+  { file: 'horse', height: 2.5, count: 10, herd: 5, walk: 2.8, run: 15, clearing: true },
+  { file: 'horse_white', height: 2.6, count: 2, herd: 1, walk: 2.8, run: 16, clearing: true },
+  { file: 'fox', height: 0.9, count: 10, herd: 1, walk: 2.8, run: 12 },
+  { file: 'alpaca', height: 2.2, count: 6, herd: 3, walk: 2.2, run: 10, clearing: true },
+  { file: 'bull', height: 2.2, count: 3, herd: 1, walk: 2.0, run: 11, clearing: true },
+  { file: 'cow', height: 2.0, count: 6, herd: 3, walk: 1.8, run: 9, clearing: true },
+  { file: 'donkey', height: 1.8, count: 4, herd: 2, walk: 2.0, run: 10, clearing: true },
+  { file: 'husky', height: 1.25, count: 4, herd: 2, walk: 2.8, run: 13 },
+  { file: 'shibainu', height: 1.0, count: 4, herd: 2, walk: 2.8, run: 12 },
+];
+const ANIMAL_NEAR = 95;   // au-delà, l'animal est caché et simulé grossièrement, sans animation
+const HOWL_RANGE = 55;    // distance à laquelle le hurlement fait fuir
+const animals = [];
+const arand = mulberry32(777);
+function animalFree(x, z, r) {
+  const h = groundH(x, z);
+  return h > 0.15 && h < MAX_WALK_H && Math.hypot(x, z) < R * 0.95 && !hitObs(x, z, h, r);
+}
+function animalSpot(clearing) {
+  for (let i = 0; i < 600; i++) {
+    const x = (arand() * 2 - 1) * R * 0.75, z = (arand() * 2 - 1) * R * 0.75;
+    if (Math.hypot(x, z) < 35) continue;
+    const h = groundH(x, z); if (h < 0.6 || h > 5) continue;
+    if (clearing && FD(x, z) > 0.02) continue;
+    if (!animalFree(x, z, 2)) continue;
+    return { x, z };
+  }
+  return null;
+}
+function playAnimal(a, name, fade = 0.3) {
+  if (a.cur === name) return;
+  a.actions[name].reset().setEffectiveWeight(1).fadeIn(fade).play();
+  if (a.cur) a.actions[a.cur].fadeOut(fade);
+  a.cur = name;
+}
+function spawnAnimal(sp, tpl, clips, scale, minY, x, z) {
+  const model = cloneSkinned(tpl);
+  model.scale.setScalar(scale);
+  model.position.y = -minY * scale;
+  const root = new THREE.Group();
+  root.add(model);
+  root.visible = false;
+  scene.add(root);
+  const mixer = new THREE.AnimationMixer(model);
+  const actions = {};
+  for (const [k, n] of Object.entries({ idle: 'Idle', walk: 'Walk', run: 'Gallop', eat: 'Eating' })) actions[k] = mixer.clipAction(THREE.AnimationClip.findByName(clips, n));
+  const a = { sp, root, mixer, actions, cur: null, x, z, angle: arand() * 6.28, heading: null, state: 'idle', t: arand() * 6,
+    homeX: x, homeZ: z, tx: x, tz: z, fx: 0, fz: 0, r: sp.height * 0.3, acc: 0, eat: arand() < 0.5 };
+  a.heading = a.angle;
+  playAnimal(a, a.eat ? 'eat' : 'idle', 0);
+  mixer.update(arand() * 3); // désynchronise les animaux d'un même troupeau
+  animals.push(a);
+}
+async function loadAnimals() {
+  for (const sp of SPECIES) {
+    let gltf;
+    try { gltf = await gltfLoader.loadAsync(`assets/animals/${sp.file}.glb`); }
+    catch (e) { console.warn('Animal indisponible :', sp.file, e); continue; }
+    const tpl = gltf.scene;
+    tpl.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.frustumCulled = false;
+      for (const m of [].concat(o.material)) { m.flatShading = true; m.metalness = 0; m.roughness = 0.9; m.needsUpdate = true; }
+    });
+    const box = measureModel(tpl), scale = sp.height / (box.max.y - box.min.y);
+    for (let left = sp.count; left > 0; left -= sp.herd) {
+      const c = animalSpot(sp.clearing); if (!c) break;
+      for (let k = 0; k < Math.min(sp.herd, left); k++) {
+        for (let tries = 0; tries < 20; tries++) {
+          const x = c.x + (arand() - 0.5) * 10, z = c.z + (arand() - 0.5) * 10;
+          if (animalFree(x, z, sp.height * 0.3)) { spawnAnimal(sp, tpl, gltf.animations, scale, box.min.y, x, z); break; }
+        }
+      }
+    }
+    await new Promise(r => setTimeout(r, 0)); // laisse respirer l'affichage entre deux espèces
+  }
+}
+// Avance dans la direction voulue, ou contourne l'obstacle en déviant de plus en plus.
+function moveAnimal(a, dx, dz, dist) {
+  for (const ang of [0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9]) {
+    const c = Math.cos(ang), s = Math.sin(ang), rx = dx * c - dz * s, rz = dx * s + dz * c;
+    const nx = a.x + rx * dist, nz = a.z + rz * dist;
+    if (animalFree(nx, nz, a.r)) { a.x = nx; a.z = nz; return [rx, rz]; }
+  }
+  return null;
+}
+function stepAnimal(a, dt) {
+  a.t -= dt;
+  if (a.state === 'flee') {
+    // Toujours à l'opposé de l'endroit du hurlement ; moveAnimal dévie si un obstacle barre la route.
+    const ex = a.x - a.fx, ez = a.z - a.fz, el = Math.hypot(ex, ez) || 1;
+    const d = moveAnimal(a, ex / el, ez / el, a.sp.run * dt);
+    if (d) a.heading = Math.atan2(d[0], d[1]);
+    if (a.t <= 0) { a.state = 'idle'; a.t = 3 + arand() * 4; a.homeX = a.x; a.homeZ = a.z; a.eat = arand() < 0.5; }
+  } else if (a.state === 'walk') {
+    const ex = a.tx - a.x, ez = a.tz - a.z, d = Math.hypot(ex, ez);
+    if (d < 0.8 || a.t <= 0) { a.state = 'idle'; a.t = 3 + arand() * 7; a.eat = arand() < 0.5; return; }
+    const m = moveAnimal(a, ex / d, ez / d, Math.min(d, a.sp.walk * dt));
+    if (m) a.heading = Math.atan2(m[0], m[1]);
+    else { a.state = 'idle'; a.t = 1 + arand() * 2; }
+  } else if (a.t <= 0) {
+    const ang = arand() * 6.28, dist = 6 + arand() * 18;
+    a.tx = a.homeX + Math.cos(ang) * dist; a.tz = a.homeZ + Math.sin(ang) * dist;
+    if (animalFree(a.tx, a.tz, a.r)) { a.state = 'walk'; a.t = 20; } else a.t = 0.5;
+  }
+}
+function scareAnimals() {
+  for (const a of animals) {
+    const dx = a.x - W.x, dz = a.z - W.z, d = Math.hypot(dx, dz);
+    if (d > HOWL_RANGE) continue;
+    a.state = 'flee';
+    a.t = 4 + arand() * 3 + (1 - d / HOWL_RANGE) * 2;
+    a.fx = W.x; a.fz = W.z; // point de départ de la fuite
+    a.heading = Math.atan2(dx, dz);
+  }
+}
+function updateAnimals(dt) {
+  for (const a of animals) {
+    if (Math.abs(a.x - W.x) > ANIMAL_NEAR || Math.abs(a.z - W.z) > ANIMAL_NEAR) {
+      a.root.visible = false;
+      a.acc += dt;
+      if (a.acc >= 0.5) { for (let k = 0; k < 5; k++) stepAnimal(a, a.acc / 5); a.acc = 0; a.angle = a.heading; }
+      continue;
+    }
+    a.root.visible = true;
+    stepAnimal(a, dt);
+    playAnimal(a, a.state === 'flee' ? 'run' : a.state === 'walk' ? 'walk' : a.eat ? 'eat' : 'idle');
+    a.mixer.update(dt);
+    let d = a.heading - a.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
+    a.angle += d * Math.min(1, dt * 6);
+    a.root.position.set(a.x, groundH(a.x, a.z), a.z);
+    a.root.rotation.y = a.angle;
+  }
+}
 
 /* ---------- Effets ---------- */
 const effects = [];
@@ -868,8 +1058,8 @@ function toast(title, sub = '', ms = 3200) {
 function zoneName(x, z) {
   if (Math.hypot(x, z) < 22) return 'Cercle des Pierres Anciennes';
   for (const L of LAKES) if (Math.hypot(x - L.x, z - L.z) < L.r * 1.35) return L.name;
-  if (Math.hypot(x - PEAK.x, z - PEAK.z) < PEAK.r * 1.5) return 'Contreforts du ' + PEAK.name;
-  if (Math.hypot(x, z) > edgeRadius(x, z) - 34) return 'Pieds des Monts Gris';
+  for (const P of PEAKS) if (Math.hypot(x - P.x, z - P.z) < P.r * 1.5) return 'Contreforts du ' + P.name;
+  if (Math.hypot(x, z) > edgeRadius(x, z) - 50) return 'Pieds des Monts Gris';
   if (FD(x, z) > 0.08) return 'Forêt des Ombres';
   return 'Clairières Sauvages';
 }
@@ -877,25 +1067,27 @@ let curZone = zoneName(W.x, W.z), zoneCand = curZone, zoneT = 0;
 
 /* ---------- Mini-carte ---------- */
 const mapCv = document.getElementById('map'), mctx = mapCv.getContext('2d');
-const MAP_RANGE = R * 1.05;
-const mapBase = document.createElement('canvas'); mapBase.width = mapBase.height = 200;
+const MAP_VIEW = 110; // rayon affiché autour du loup, en unités du monde
+const mapBase = document.createElement('canvas'); mapBase.width = mapBase.height = N + 1;
 {
-  const x = mapBase.getContext('2d'), img = x.createImageData(200, 200);
-  for (let j = 0; j < 200; j++) for (let i = 0; i < 200; i++) {
-    const wx = (i / 199 * 2 - 1) * MAP_RANGE, wz = (j / 199 * 2 - 1) * MAP_RANGE, h = H(wx, wz);
+  const x = mapBase.getContext('2d'), img = x.createImageData(N + 1, N + 1);
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const wx = -SIZE / 2 + i * STEP, wz = -SIZE / 2 + j * STEP, h = HGRID[j * (N + 1) + i];
     let c;
     if (h < 0) c = [18, 38, 66];
     else if (h > MAX_WALK_H) { const k = Math.min(1, (h - MAX_WALK_H) / 25); c = [60 + k * 70, 60 + k * 74, 74 + k * 84]; }
     else { const f = smooth(-0.06, 0.18, FD(wx, wz)); c = [lerp(58, 22, f), lerp(76, 40, f), lerp(56, 34, f)]; }
-    const o = (j * 200 + i) * 4; img.data.set([c[0], c[1], c[2], 255], o);
+    img.data.set([c[0], c[1], c[2], 255], (j * (N + 1) + i) * 4);
   }
   x.putImageData(img, 0, 0);
 }
 function drawMap(t) {
-  const S = mapCv.width, half = S / 2, scale = S / (MAP_RANGE * 2) * 1.35;
+  const S = mapCv.width, half = S / 2, scale = S / (MAP_VIEW * 2);
   mctx.save(); mctx.clearRect(0, 0, S, S);
-  mctx.translate(half, half); mctx.rotate(Math.PI / 4); mctx.scale(scale, scale); mctx.translate(-W.x * 0.35, -W.z * 0.35);
-  mctx.drawImage(mapBase, -MAP_RANGE, -MAP_RANGE, MAP_RANGE * 2, MAP_RANGE * 2);
+  mctx.translate(half, half); mctx.rotate(Math.PI / 4); mctx.scale(scale, scale); mctx.translate(-W.x, -W.z);
+  mctx.drawImage(mapBase, -SIZE / 2, -SIZE / 2, SIZE, SIZE);
+  mctx.fillStyle = 'rgba(230,220,200,0.55)';
+  for (const a of animals) { if (Math.abs(a.x - W.x) < MAP_VIEW && Math.abs(a.z - W.z) < MAP_VIEW) { mctx.beginPath(); mctx.arc(a.x, a.z, 1.6, 0, 7); mctx.fill(); } }
   mctx.fillStyle = `rgba(143,243,255,${0.5 + 0.5 * Math.sin(t * 3)})`;
   for (const s of shards) if (!s.taken) { mctx.beginPath(); mctx.arc(s.x, s.z, 4.2, 0, 7); mctx.fill(); }
   mctx.strokeStyle = collected === shards.length ? '#9ff6ff' : 'rgba(180,140,255,0.8)'; mctx.lineWidth = 2;
@@ -910,7 +1102,7 @@ const FWD = new THREE.Vector3(-1, 0, -1).normalize(), RIGHT = new THREE.Vector3(
 const dir = new THREE.Vector3();
 const WOLF_R = 0.55;
 function canStand(x, z, y) {
-  const h = H(x, z);
+  const h = groundH(x, z);
   if (h < MIN_WALK_H || h > MAX_WALK_H) return false;
   if (Math.hypot(x, z) > R * 1.02) return false;
   return !hitObs(x, z, Math.max(y, h), WOLF_R);
@@ -941,7 +1133,7 @@ function moveWolf(mx, mz) {
     for (const side of a ? [W.slide, -W.slide] : [1]) {
       const c = Math.cos(a * side), s = Math.sin(a * side), f = 0.35 + 0.65 * Math.cos(a);
       const rx = (mx * c - mz * s) * f, rz = (mx * s + mz * c) * f;
-      let [nx, nz] = pushOut(W.x + rx, W.z + rz, Math.max(W.y, H(W.x + rx, W.z + rz)));
+      let [nx, nz] = pushOut(W.x + rx, W.z + rz, Math.max(W.y, groundH(W.x + rx, W.z + rz)));
       const ddx = nx - W.x, ddz = nz - W.z;
       // Le déplacement réel doit vraiment avancer, pas reculer ni piétiner contre l'obstacle.
       if (ddx * rx + ddz * rz < 0.3 * (rx * rx + rz * rz) || ddx * mx + ddz * mz <= 0.02 * len2) continue;
@@ -955,7 +1147,7 @@ function moveWolf(mx, mz) {
 }
 function howl() {
   if (W.howl > 0) return;
-  W.howl = 2.4; playHowl();
+  W.howl = 2.4; playHowl(); scareAnimals();
   shockRing(W.x, W.y, W.z, 0x8ff3ff, 22, 2.4);
   setTimeout(() => shockRing(W.x, W.y, W.z, 0xb48cff, 16, 2.0), 400);
 }
@@ -970,7 +1162,7 @@ function collect(s) {
   ringMat.color.copy(runeMat.color);
   updateShardHud();
   if (collected === shards.length) { awakened = true; toast('Les pierres s’éveillent', 'Retourne au Cercle des Pierres Anciennes.', 5000); playChime(true); }
-  else toast(`Éclat de lune ${collected} / ${shards.length}`, ['Une lueur froide te traverse.', 'Les runes frémissent au loin.', 'Quelque chose t’observe depuis les arbres.', 'Le vent murmure ton nom.', 'La brume s’écarte un instant.', 'Plus qu’un éclat.'][collected - 1] || '', 3000);
+  else toast(`Éclat de lune ${collected} / ${shards.length}`, ['Une lueur froide te traverse.', 'Les runes frémissent au loin.', 'Quelque chose t’observe depuis les arbres.', 'Le vent murmure ton nom.', 'La brume s’écarte un instant.', 'Les bêtes se taisent sur ton passage.', 'La lune semble plus proche.', 'Plus qu’un éclat.'][collected - 1] || '', 3000);
 }
 
 function update(dt, t) {
@@ -978,7 +1170,7 @@ function update(dt, t) {
   const ix = (keys.right ? 1 : 0) - (keys.left ? 1 : 0), iy = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
   dir.set(0, 0, 0).addScaledVector(FWD, iy).addScaledVector(RIGHT, ix);
   const moving = dir.lengthSq() > 0 && W.howl <= 0;
-  const hHere = H(W.x, W.z);
+  const hHere = groundH(W.x, W.z);
   if (moving) {
     dir.normalize();
     let spd = keys.run ? 14 : 8;
@@ -991,7 +1183,7 @@ function update(dt, t) {
   // Saut et gravité
   if (jumpQueued && W.ground && W.howl <= 0) { W.vy = 10.5; W.ground = false; playJump(); }
   jumpQueued = false;
-  const g = H(W.x, W.z);
+  const g = groundH(W.x, W.z);
   if (W.ground) {
     if (g < W.y - 0.6) W.ground = false; else W.y = g;
   }
@@ -1043,7 +1235,7 @@ function updateWorld(dt, t) {
   }
   // Fin
   if (awakened && !finished && Math.hypot(W.x, W.z) < 4.2) {
-    finished = true; playChime(true); burst(0, H(0, 0) + 1, 0, 0x9ff6ff, 160); shockRing(0, H(0, 0), 0, 0x9ff6ff, 40, 3);
+    finished = true; playChime(true); burst(0, groundH(0, 0) + 1, 0, 0x9ff6ff, 160); shockRing(0, groundH(0, 0), 0, 0x9ff6ff, 40, 3);
     toast('La première terre est apaisée', 'La lune se souvient de toi. Au-delà des Monts Gris, d’autres terres attendent…', 9000);
   }
   if (awakened) finalBeam.material.opacity = THREE.MathUtils.lerp(finalBeam.material.opacity, finished ? 0.35 : 0.12 + Math.sin(t * 2) * 0.04, 0.03);
@@ -1053,15 +1245,6 @@ function updateWorld(dt, t) {
   if (z !== zoneCand) { zoneCand = z; zoneT = 0; }
   else if (z !== curZone && (zoneT += dt) > 0.6) { curZone = z; zoneEl.style.opacity = 0; setTimeout(() => { zoneEl.textContent = z; zoneEl.style.opacity = 0.85; }, 500); }
 
-  // Feux follets
-  const wp = wispGeo.attributes.position.array;
-  for (let i = 0; i < WISP_N; i++) {
-    const b = i * 4, ph = wispBase[b + 3];
-    wp[i * 3] = wispBase[b] + Math.sin(t * 0.3 + ph) * 2.2;
-    wp[i * 3 + 1] = wispBase[b + 1] + Math.sin(t * 0.9 + ph * 2) * 0.6;
-    wp[i * 3 + 2] = wispBase[b + 2] + Math.cos(t * 0.25 + ph) * 2.2;
-  }
-  wispGeo.attributes.position.needsUpdate = true;
   // Cendres
   const ap = ashGeo.attributes.position.array, hb = ASH_BOX / 2;
   for (let i = 0; i < ASH_N; i++) {
@@ -1103,16 +1286,15 @@ let elapsed = 0, introSpin = 0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
+  updateAnimals(dt);
   if (started) update(dt, elapsed);
   else {
     introSpin += dt;
     if (rig) rig.mixer.update(dt);
     wolf.root.position.set(W.x, W.y, W.z); wolf.tail.rotation.y = Math.sin(elapsed * 2) * 0.12; wolf.tail.rotation.x = -0.55;
     wolf.head.rotation.x = Math.sin(elapsed * 0.7) * 0.06;
-    const wp = wispGeo.attributes.position.array;
-    for (let i = 0; i < WISP_N; i++) { const b = i * 4, ph = wispBase[b + 3]; wp[i * 3] = wispBase[b] + Math.sin(elapsed * 0.3 + ph) * 2.2; wp[i * 3 + 1] = wispBase[b + 1] + Math.sin(elapsed * 0.9 + ph * 2) * 0.6; wp[i * 3 + 2] = wispBase[b + 2] + Math.cos(elapsed * 0.25 + ph) * 2.2; }
-    wispGeo.attributes.position.needsUpdate = true;
   }
+  wispMat.uniforms.uTime.value = elapsed;
   placeCamera(1 - Math.pow(0.0015, dt));
   composer.render();
   if (started) drawMap(elapsed);
@@ -1125,11 +1307,12 @@ function begin() {
   if (started) return;
   started = true; initAudio();
   document.getElementById('intro').classList.add('gone');
-  setTimeout(() => toast('Cercle des Pierres Anciennes', 'Sept éclats de lune sont tombés dans les terres sauvages. Suis leurs rayons.', 5200), 900);
+  setTimeout(() => toast('Cercle des Pierres Anciennes', 'Neuf éclats de lune sont tombés dans les terres sauvages. Suis leurs rayons.', 5200), 900);
   setTimeout(() => { document.getElementById('help').style.opacity = 0.35; }, 14000);
 }
 const startBtn = document.getElementById('start');
 startBtn.disabled = false; startBtn.textContent = 'Entrer dans la nuit';
+loadAnimals();
 startBtn.addEventListener('click', begin);
 startBtn.focus();
 </script>
