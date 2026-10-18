@@ -14,8 +14,9 @@ Jeu 3D isométrique dans le navigateur. Un loup explore une grande terre sauvage
 | H | hurler (fait fuir les animaux proches) |
 | Molette | zoom |
 | M | couper / remettre le son |
+| F | plein écran |
 
-Sur mobile, des boutons tactiles s'affichent à l'écran.
+Sur mobile : joystick à gauche (poussé à fond pour courir), boutons Sauter et Hurler à droite, zoom à deux doigts. Les boutons son et plein écran sont sous la mini-carte (le plein écran n'existe pas sur iPhone, le bouton y est masqué).
 
 ## Technique
 
@@ -32,6 +33,7 @@ Sur mobile, des boutons tactiles s'affichent à l'écran.
 - La hauteur du sol est lue dans une grille précalculée au lieu de recalculer le bruit.
 - Les feux follets flottent grâce à un shader : aucun calcul processeur par image.
 - Les animaux loin du loup sont cachés et simulés grossièrement deux fois par seconde, sans animation.
+- Qualité adaptative : sur mobile, résolution limitée à 1×, bloom en demi-résolution et ombres plus légères. Si les images ralentissent (moins de 40 par seconde), le jeu baisse d'un cran (résolution, bloom, ombres), puis remonte quand tout redevient fluide.
 
 ## Lancer en local
 
