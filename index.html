@@ -284,6 +284,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
@@ -683,6 +685,7 @@ const natureReady = new GLTFLoader().loadAsync('assets/nature.glb').then(gltf =>
     const m = o.material; seen.add(m);
     m.vertexColors = false; // les couleurs de sommet du pack servent au vent dans d'autres moteurs
     m.metalness = 0; m.roughness = 1;
+    if (m.map) m.map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); // textures nettes vues de biais
     const role = materialRole(m.name);
     if (role === 'mush') { m.emissive = new THREE.Color(0x3fe8ff); m.emissiveIntensity = 0.9; }
     if (/grass/i.test(m.name)) {
@@ -719,6 +722,7 @@ const natureReady = new GLTFLoader().loadAsync('assets/nature.glb').then(gltf =>
     grass.meshes.push({ list, max: perVariant });
   }
   natureLoaded = true;
+  setAlphaToCoverage(QUALITY[qLevel].msaa > 0);
   applyAmbience(dayK);
   updateGrass(true);
 }).catch(err => console.warn('Décor nature indisponible :', err));
@@ -1656,11 +1660,15 @@ function updateWorld(dt, t) {
 
 /* ---------- Caméra & post-traitement ---------- */
 const camTarget = new THREE.Vector3(W.x, W.y, W.z);
-const composer = new EffectComposer(renderer);
+// Anticrénelage : le rendu passe par des cibles multi-échantillonnées (MSAA), car l'option antialias
+// du canvas ne s'applique pas au rendu en plusieurs passes. Sans MSAA (qualité basse), un filtre FXAA prend le relais.
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 }));
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.55, 0.62);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+const fxaa = new ShaderPass(FXAAShader);
+composer.addPass(fxaa);
 
 /* ---------- Ambiance jour / nuit ---------- */
 // Chaque réglage a une valeur de nuit et une valeur de jour ; dayK (0 = nuit, 1 = jour) les mélange pendant la bascule.
@@ -1709,10 +1717,10 @@ function updateAmbience(dt) {
 // Mobile : on démarre en qualité moyenne. Partout : si les images ralentissent, on baisse d'un cran
 // (résolution, bloom, ombres) ; si tout redevient fluide, on remonte, sans dépasser le niveau de départ.
 const QUALITY = [
-  { pr: Math.min(devicePixelRatio, 1.5), shadow: 2048, bloom: 1 },
-  { pr: Math.min(devicePixelRatio, 1), shadow: 1024, bloom: 0.5 },
-  { pr: Math.min(devicePixelRatio, 0.8), shadow: 1024, bloom: 0 },
-  { pr: Math.min(devicePixelRatio, 0.65), shadow: 512, bloom: 0 },
+  { pr: Math.min(devicePixelRatio, 2), shadow: 2048, bloom: 1, msaa: 4 },
+  { pr: Math.min(devicePixelRatio, 1.25), shadow: 1024, bloom: 0.5, msaa: 4 },
+  { pr: Math.min(devicePixelRatio, 1), shadow: 1024, bloom: 0, msaa: 0 },
+  { pr: Math.min(devicePixelRatio, 0.75), shadow: 512, bloom: 0, msaa: 0 },
 ];
 const qStart = isTouch ? 1 : 0;
 let qLevel = qStart;
@@ -1727,7 +1735,15 @@ function applyQuality() {
     if (moon.shadow.map) { moon.shadow.map.dispose(); moon.shadow.map = null; }
   }
   wispMat.uniforms.uSize.value = 9 * q.pr;
+  for (const rt of [composer.renderTarget1, composer.renderTarget2]) if (rt.samples !== q.msaa) { rt.samples = q.msaa; rt.dispose(); }
+  fxaa.enabled = q.msaa === 0;
+  fxaa.material.uniforms.resolution.value.set(1 / (innerWidth * q.pr), 1 / (innerHeight * q.pr));
+  setAlphaToCoverage(q.msaa > 0);
   fitCamera();
+}
+// Feuilles, fleurs et herbe : avec le MSAA, leurs bords découpés dans la texture deviennent lisses (alpha-to-coverage).
+function setAlphaToCoverage(on) {
+  for (const { mat } of natureMats) if (mat.alphaTest > 0 && mat.alphaToCoverage !== on) { mat.alphaToCoverage = on; mat.needsUpdate = true; }
 }
 let perfT = 0, perfFrames = 0, perfGood = 0;
 function monitorPerf(raw) {
