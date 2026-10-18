@@ -12,16 +12,16 @@ Prises en format téléphone (Pixel 9a), avec les commandes tactiles.
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/nuit-foret.jpg" width="200" alt="La nuit, un éclat de lune dans la Forêt des Ombres"></td>
-    <td><img src="docs/screenshots/grotte-hall.jpg" width="200" alt="Hall des Racines, sous la montagne"></td>
-    <td><img src="docs/screenshots/grotte-coeur.jpg" width="200" alt="Cœur de la Montagne"></td>
-    <td><img src="docs/screenshots/jour-grotte.jpg" width="200" alt="L’entrée de la grotte en plein jour"></td>
+    <td><img src="docs/screenshots/nuit-foret.jpg" width="180" alt="Un éclat de lune, la nuit"></td>
+    <td><img src="docs/screenshots/grotte-hall.jpg" width="180" alt="Hall des Racines"></td>
+    <td><img src="docs/screenshots/grotte-coeur.jpg" width="180" alt="Cœur de la Montagne"></td>
+    <td><img src="docs/screenshots/jour-grotte.jpg" width="180" alt="La grotte, en plein jour"></td>
   </tr>
   <tr>
-    <td align="center"><sub>La nuit, un éclat de lune dans la Forêt des Ombres</sub></td>
-    <td align="center"><sub>Hall des Racines, sous la montagne</sub></td>
+    <td align="center"><sub>Un éclat de lune, la nuit</sub></td>
+    <td align="center"><sub>Hall des Racines</sub></td>
     <td align="center"><sub>Cœur de la Montagne</sub></td>
-    <td align="center"><sub>L’entrée de la grotte en plein jour</sub></td>
+    <td align="center"><sub>La grotte, en plein jour</sub></td>
   </tr>
 </table>
 
