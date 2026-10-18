@@ -10,20 +10,14 @@ Au flanc est du Mont des Hiboux, une arche entourée de torches mène à la **Gr
 
 Prises en format téléphone (Pixel 9a), avec les commandes tactiles.
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/nuit-foret.jpg" width="180" alt="Un éclat de lune, la nuit"></td>
-    <td><img src="docs/screenshots/grotte-hall.jpg" width="180" alt="Hall des Racines"></td>
-    <td><img src="docs/screenshots/grotte-coeur.jpg" width="180" alt="Cœur de la Montagne"></td>
-    <td><img src="docs/screenshots/jour-grotte.jpg" width="180" alt="La grotte, en plein jour"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Un éclat de lune, la nuit</sub></td>
-    <td align="center"><sub>Hall des Racines</sub></td>
-    <td align="center"><sub>Cœur de la Montagne</sub></td>
-    <td align="center"><sub>La grotte, en plein jour</sub></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/nuit-foret.jpg" width="24%" alt="Un éclat de lune, la nuit">
+  <img src="docs/screenshots/grotte-hall.jpg" width="24%" alt="Hall des Racines">
+  <img src="docs/screenshots/grotte-coeur.jpg" width="24%" alt="Cœur de la Montagne">
+  <img src="docs/screenshots/jour-grotte.jpg" width="24%" alt="La grotte, en plein jour">
+</p>
+
+<p align="center"><sub>De gauche à droite : Un éclat de lune, la nuit · Hall des racines · Cœur de la Montagne · la grotte, en plein jour</sub></p>
 
 ## Commandes
 
