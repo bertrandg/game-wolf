@@ -1336,17 +1336,68 @@ function playTransition(toDay) {
     o.connect(g).connect(master); o.start(s); o.stop(s + 2.6);
   });
 }
+// Hurlement : une voix presque pure (fondamentale et quelques harmoniques douces) qui monte en glissando,
+// tient la note avec un vibrato qui s'installe peu à peu, puis retombe ; un souffle léger et une grande
+// réverbération donnent l'espace de la forêt. Parfois, un loup lointain répond.
+let howlVerb = null;
+function makeReverb(ctx, seconds = 3.8) {
+  const len = Math.floor(ctx.sampleRate * seconds), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8);
+  }
+  const c = ctx.createConvolver(); c.buffer = ir;
+  return c;
+}
+function howlVoice(ctx, dest, verb, t, { base = 1, dur = 3.4, gain = 0.3, pan = 0, wet = 0.55 } = {}) {
+  // Courbe de hauteur : montée rapide, léger dépassement, tenue qui fléchit doucement, chute finale.
+  const N = 96, curve = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const u = i / (N - 1); let f;
+    if (u < 0.2) { const k = u / 0.2; f = 0.6 + 0.43 * (1 - Math.pow(1 - k, 3)); }
+    else if (u < 0.3) f = 1.03 - 0.03 * (u - 0.2) / 0.1;
+    else if (u < 0.72) f = 1.0 - 0.04 * (u - 0.3) / 0.42;
+    else { const k = (u - 0.72) / 0.28; f = 0.96 - 0.34 * k * k; }
+    curve[i] = 540 * base * f;
+  }
+  const end = t + dur;
+  const osc = ctx.createOscillator();
+  osc.setPeriodicWave(ctx.createPeriodicWave(new Float32Array(6), new Float32Array([0, 1, 0.26, 0.09, 0.035, 0.012])));
+  osc.frequency.setValueCurveAtTime(curve, t, dur);
+  const vib = ctx.createOscillator(), vg = ctx.createGain();
+  vib.frequency.value = 4.6 + Math.random() * 1.2;
+  vg.gain.setValueAtTime(0, t); vg.gain.setValueAtTime(0, t + dur * 0.3);
+  vg.gain.linearRampToValueAtTime(10 * base, t + dur * 0.62); vg.gain.linearRampToValueAtTime(5 * base, end);
+  vib.connect(vg).connect(osc.frequency);
+  const pk = ctx.createBiquadFilter(); pk.type = 'peaking'; pk.frequency.value = 1100; pk.Q.value = 1.1; pk.gain.value = 4;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.7;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t); env.gain.linearRampToValueAtTime(0.45, t + 0.12); env.gain.exponentialRampToValueAtTime(1, t + 0.45);
+  env.gain.setValueAtTime(1, t + dur * 0.55); env.gain.linearRampToValueAtTime(0.72, t + dur * 0.82);
+  env.gain.exponentialRampToValueAtTime(0.0001, end);
+  osc.connect(pk).connect(lp).connect(env);
+  // Souffle : bruit filtré autour de la note, très discret.
+  const nb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * dur), ctx.sampleRate), nd = nb.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource(); noise.buffer = nb;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.5; bp.frequency.setValueCurveAtTime(curve.map(v => v * 2), t, dur);
+  const ng = ctx.createGain(); ng.gain.value = 0.07;
+  noise.connect(bp).connect(ng).connect(env);
+  const out = ctx.createGain(); out.gain.value = gain;
+  const panner = ctx.createStereoPanner(); panner.pan.value = pan;
+  const send = ctx.createGain(); send.gain.value = wet;
+  env.connect(out).connect(panner).connect(dest);
+  out.connect(send).connect(verb);
+  for (const n of [osc, vib, noise]) { n.start(t); n.stop(end + 0.05); }
+}
 function playHowl() {
   if (!actx || muted) return;
-  const t = actx.currentTime, out = actx.createGain(); out.connect(master);
-  out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(0.32, t + 0.35); out.gain.setValueAtTime(0.3, t + 1.6); out.gain.exponentialRampToValueAtTime(0.001, t + 2.8);
-  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400; lp.Q.value = 4; lp.connect(out);
-  const vib = actx.createOscillator(); vib.frequency.value = 5.2; const vg = actx.createGain(); vg.gain.value = 7; vib.connect(vg); vib.start(t); vib.stop(t + 3);
-  for (const [type, mul, g] of [['sawtooth', 1, 0.5], ['triangle', 1.5, 0.5], ['sine', 2, 0.3]]) {
-    const o = actx.createOscillator(); o.type = type; const og = actx.createGain(); og.gain.value = g;
-    o.frequency.setValueAtTime(290 * mul, t); o.frequency.exponentialRampToValueAtTime(520 * mul, t + 0.55);
-    o.frequency.linearRampToValueAtTime(480 * mul, t + 1.6); o.frequency.exponentialRampToValueAtTime(320 * mul, t + 2.8);
-    vg.connect(o.frequency); o.connect(og).connect(lp); o.start(t); o.stop(t + 3);
+  if (!howlVerb) { howlVerb = makeReverb(actx); const rg = actx.createGain(); rg.gain.value = 0.8; howlVerb.connect(rg).connect(master); }
+  const t = actx.currentTime + 0.02, base = 0.92 + Math.random() * 0.16;
+  howlVoice(actx, master, howlVerb, t, { base, gain: 0.34 });
+  if (Math.random() < 0.6) {
+    howlVoice(actx, master, howlVerb, t + 1.7 + Math.random() * 0.8,
+      { base: base * (0.84 + Math.random() * 0.1), dur: 2.9, gain: 0.07, pan: Math.random() < 0.5 ? -0.75 : 0.75, wet: 1.5 });
   }
 }
 function playChime(high = false) {
