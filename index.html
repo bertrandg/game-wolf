@@ -50,6 +50,9 @@ body {
 }
 body.day #sunglare { opacity: 1; }
 #flash { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
+#fade { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; background: #000; transition: opacity 0.45s ease; }
+#fade.on { opacity: 1; }
+body.cave #sunglare { opacity: 0; transition: opacity 0.3s; }
 .vignette { transition: opacity 5s; }
 body.day .vignette { opacity: 0.3; }
 body.day .hud-title .zone, body.day .toast small { color: var(--sun); }
@@ -227,6 +230,7 @@ body.day .shard-ico.on { background: var(--sun); box-shadow: 0 0 12px var(--embe
 <div id="scene"></div>
 <div class="vignette"></div>
 <div id="flash"></div>
+<div id="fade"></div>
 <div id="sunglare"></div>
 
 <div class="hud hud-title">
@@ -338,6 +342,11 @@ const PEAKS = [
 ];
 const CIRCLE_R = 9;
 const MAX_WALK_H = 6.8, MIN_WALK_H = -0.8;
+// Entrée de la grotte, creusée dans le flanc est du Mont des Hiboux, tournée vers la caméra.
+// a : orientation de l'arche (son axe local +z pointe vers l'extérieur) ; n : direction de sortie, t : le long de la façade.
+const CAVE = { x: 99.1, z: 65.6, h: 4.2, a: 1.22 };
+CAVE.nx = Math.sin(CAVE.a); CAVE.nz = Math.cos(CAVE.a); CAVE.tx = CAVE.nz; CAVE.tz = -CAVE.nx;
+const caveLocal = (x, z) => { const dx = x - CAVE.x, dz = z - CAVE.z; return [dx * CAVE.nx + dz * CAVE.nz, dx * CAVE.tx + dz * CAVE.tz]; };
 
 function edgeRadius(x, z) { const a = Math.atan2(z, x); return R * 0.8 + fbm(Math.cos(a) * 1.6 + 5, Math.sin(a) * 1.6 + 5, 3) * 68; }
 function H(x, z) {
@@ -349,6 +358,14 @@ function H(x, z) {
   for (const P of PEAKS) {
     const dp = Math.hypot(x - P.x, z - P.z) / P.r;
     if (dp < 1.3) { const k = smooth(1.25, 0, dp); h += k * k * (24 + ridged(x * 0.05 + 9, z * 0.05, 4) * 16); }
+  }
+  // Devant la grotte, un replat ; derrière l'arche, une falaise dans laquelle elle semble taillée.
+  const [cu, cv] = caveLocal(x, z);
+  if (cu > -18 && cu < 16 && Math.abs(cv) < 18) {
+    const front = smooth(13, 7, cu) * smooth(-2.5, -0.5, cu) * smooth(11, 6, Math.abs(cv));
+    h = h * (1 - front) + CAVE.h * front;
+    const back = smooth(0.4, -3, cu) * smooth(-18, -11, cu) * smooth(15, 8, Math.abs(cv));
+    h = Math.max(h, CAVE.h + back * (11 + fbm(x * 0.2, z * 0.2, 2) * 3));
   }
   for (const L of LAKES) {
     const d = Math.hypot(x - L.x, z - L.z) / (L.r * (1 + fbm(x * 0.04, z * 0.04, 2) * 0.4));
@@ -377,7 +394,7 @@ scene.background = new THREE.Color(0x07080f);
 scene.fog = new THREE.Fog(FOG, 95, 175);
 
 let viewSize = 30;
-let shadowLight = null; // la lumière principale, une fois créée (fitCamera ajuste sa zone d'ombre)
+const shadowLights = []; // lumières qui projettent des ombres (lune/soleil, lumière de la grotte) : fitCamera ajuste leur zone
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 500);
 const CAM_DIST = 100;
 const camOffset = new THREE.Vector3(1, 1, 1).normalize().multiplyScalar(CAM_DIST);
@@ -388,10 +405,10 @@ function fitCamera() {
   camera.updateProjectionMatrix();
   // Zone d'ombre ajustée au champ visible : sur un téléphone en portrait elle est deux fois plus petite,
   // donc deux fois moins d'arbres à redessiner dans la carte d'ombre à chaque image.
-  if (shadowLight) {
-    const half = Math.min(45, 0.5 * viewSize * Math.max(1, a) + 0.4 * viewSize);
-    Object.assign(shadowLight.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
-    shadowLight.shadow.camera.updateProjectionMatrix();
+  const half = Math.min(45, 0.5 * viewSize * Math.max(1, a) + 0.4 * viewSize);
+  for (const L of shadowLights) {
+    Object.assign(L.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+    L.shadow.camera.updateProjectionMatrix();
   }
 }
 fitCamera();
@@ -403,7 +420,7 @@ const moon = new THREE.DirectionalLight(0xa9bcff, 1.6);
 moon.castShadow = true;
 moon.shadow.mapSize.set(2048, 2048);
 Object.assign(moon.shadow.camera, { left: -38, right: 38, top: 38, bottom: -38, near: 1, far: 200 });
-shadowLight = moon;
+shadowLights.push(moon);
 fitCamera();
 moon.shadow.bias = -0.0006;
 moon.shadow.normalBias = 0.04;
@@ -588,7 +605,17 @@ function scatter(count, tries, test) {
   let n = 0;
   for (let i = 0; i < tries && n < count; i++) {
     const x = (rand() * 2 - 1) * R * 1.05, z = (rand() * 2 - 1) * R * 1.05, h = groundH(x, z);
+    if (Math.hypot(x - CAVE.x, z - CAVE.z) < 15) continue; // abords de la grotte dégagés
     if (test(x, z, h)) n++;
+  }
+}
+// Abords de la grotte : piliers de l'arche (le loup passe entre les deux) et quelques rochers éboulés.
+for (const s of [-1, 1]) {
+  for (const v of [3.9, 5.2]) addObs(CAVE.x + CAVE.tx * v * s - CAVE.nx * 0.4, CAVE.z + CAVE.tz * v * s - CAVE.nz * 0.4, 0.9, CAVE.h + 20);
+  for (const [u, v, sc] of [[1.2, 7.4, 1.5], [3.5, 9.5, 1.0], [6.5, 9.8, 0.6]]) {
+    const x = CAVE.x + CAVE.nx * u + CAVE.tx * v * s, z = CAVE.z + CAVE.nz * u + CAVE.tz * v * s, h = groundH(x, z);
+    place(['Rock_Medium_1', 'Rock_Medium_3', 'Rock_Medium_2'][Math.round(sc * 2) % 3], x, h - 0.1 * sc, z, sc, 0.3);
+    addObs(x, z, sc * 1.3, h + sc * 1.8);
   }
 }
 // Arbres : pins en forêt dense et sur les pentes, feuillus en lisière et dans les clairières.
@@ -689,7 +716,7 @@ function materialRole(name) {
 }
 const grassUniforms = { uTime: { value: 0 } };
 const grass = { meshes: [], cell: 1.7, radius: isTouch ? 22 : 38, cx: null, cz: null };
-let natureLoaded = false;
+let natureLoaded = false, natureTpl = null;
 
 // Instances d'un modèle (une instance par emplacement), découpées par bloc ; chaque sous-maillage garde son matériau.
 function addModelInstances(tplRoot, items, opts) {
@@ -730,6 +757,7 @@ const tmpGrass = new THREE.Matrix4();
 const natureReady = new GLTFLoader().loadAsync('assets/nature.glb').then(gltf => {
   const tpl = {};
   for (const sc of gltf.scenes) for (const c of sc.children) tpl[c.name] = c;
+  natureTpl = tpl;
   const seen = new Set();
   for (const sc of gltf.scenes) sc.traverse(o => {
     if (!o.isMesh || seen.has(o.material)) return;
@@ -902,6 +930,420 @@ const mistMat = new THREE.SpriteMaterial({ map: glow, color: 0x7d88b8, transpare
     const s = new THREE.Sprite(mistMat); s.position.set(x, Math.max(h, 0) + 1.2, z); s.scale.setScalar(14 + rand() * 14);
     scene.add(s); n++;
   }
+}
+
+/* ---------- Grotte des Anciens (Ultimate Modular Ruins Pack de Quaternius, CC0) ---------- */
+// Le réseau souterrain est une scène à part, dessinée à la place du monde quand le loup y entre.
+// Son plan est une grille de cases de T unités : 1 = sol, 2 = bassin. Les murs sont posés entre une case et le vide :
+// pleins au fond (côtés -x et -z, loin de la caméra), bas et éboulés devant pour ne jamais cacher le loup.
+const RS = 2.2, T = 2 * RS;          // échelle des ruines : une case du pack (2 × 2) fait T unités
+const CGW = 36, CGH = 22;
+const cgrid = new Uint8Array(CGW * CGH);
+const cAt = (i, j) => i < 0 || j < 0 || i >= CGW || j >= CGH ? 0 : cgrid[j * CGW + i];
+const ROOMS = [
+  { x: 4, z: 2, w: 6, h: 5, name: 'Hall des Racines' },
+  { x: 16, z: 1, w: 8, h: 7, name: 'Salle des Gardiens' },
+  { x: 15, z: 13, w: 9, h: 7, name: 'Bassin d’Émeraude' },
+  { x: 3, z: 12, w: 7, h: 6, name: 'Crypte des Anciens' },
+  { x: 27, z: 9, w: 7, h: 7, name: 'Cœur de la Montagne' },
+  { x: 27, z: 1, w: 5, h: 4, name: 'Réserve oubliée' },
+];
+const CORRIDORS = [[10, 4, 6, 2], [6, 7, 2, 5], [19, 8, 2, 5], [10, 15, 5, 2], [24, 14, 3, 2], [24, 2, 3, 2], [29, 5, 2, 4]];
+for (const r of ROOMS) for (let j = r.z; j < r.z + r.h; j++) for (let i = r.x; i < r.x + r.w; i++) cgrid[j * CGW + i] = 1;
+for (const [x, z, w, h] of CORRIDORS) for (let j = z; j < z + h; j++) for (let i = x; i < x + w; i++) cgrid[j * CGW + i] = 1;
+const POOL = { x: 17, z: 15, w: 5, h: 3 };
+for (let j = POOL.z; j < POOL.z + POOL.h; j++) for (let i = POOL.x; i < POOL.x + POOL.w; i++) cgrid[j * CGW + i] = 2;
+const EXIT_X = 7 * T, EXIT_Z = 2 * T;             // milieu de l'arche de sortie, au fond du Hall des Racines
+const HEART = { x: 30.5 * T, z: 12.5 * T };
+const ENTRY = { x: 7 * T, z: 4.2 * T };
+const roomAt = (i, j) => ROOMS.find(r => i >= r.x && i < r.x + r.w && j >= r.z && j < r.z + r.h);
+function caveZone(x, z) { const r = roomAt(Math.floor(x / T), Math.floor(z / T)); return r ? r.name : 'Galeries oubliées'; }
+
+// Collisions : le loup (un carré de côté 2 × WOLF_R) doit rester sur des cases de sol, hors des piliers et des meubles.
+const cObs = new Map();
+function cAddObs(x, z, r) { const k = key(Math.floor(x / CELL), Math.floor(z / CELL)); let a = cObs.get(k); if (!a) cObs.set(k, a = []); a.push({ x, z, r }); }
+function cPushOut(x, z, rad) {
+  for (let it = 0; it < 3; it++) {
+    let moved = false;
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const a = cObs.get(key(cx + dx, cz + dz)); if (!a) continue;
+      for (const o of a) {
+        const ex = x - o.x, ez = z - o.z, rr = o.r + rad, d2 = ex * ex + ez * ez;
+        if (d2 < rr * rr) { const d = Math.sqrt(d2) || 1e-4, k = (rr + 0.002 - d) / d; x += ex * k; z += ez * k; moved = true; }
+      }
+    }
+    if (!moved) break;
+  }
+  return [x, z];
+}
+const caveWalk = (x, z) => cAt(Math.floor(x / T), Math.floor(z / T)) === 1;
+const caveFree = (x, z, r) => caveWalk(x - r, z - r) && caveWalk(x + r, z - r) && caveWalk(x - r, z + r) && caveWalk(x + r, z + r);
+
+const caveScene = new THREE.Scene();
+caveScene.background = new THREE.Color(0x030409);
+caveScene.fog = new THREE.Fog(0x030409, 105, 190);
+// Lumières créées tout de suite et en nombre fixe : les shaders n'ont pas à être recompilés en cours de partie.
+const cHemi = new THREE.HemisphereLight(0x5d6c9c, 0x1a140e, 1.5), cAmb = new THREE.AmbientLight(0x232842, 0.8);
+const caveSun = new THREE.DirectionalLight(0x8d9fdc, 0.6);
+caveSun.castShadow = true; caveSun.shadow.mapSize.set(2048, 2048);
+Object.assign(caveSun.shadow.camera, { near: 1, far: 200 }); caveSun.shadow.bias = -0.0006; caveSun.shadow.normalBias = 0.04;
+shadowLights.push(caveSun); fitCamera();
+const caveAura = new THREE.PointLight(0x7fa8ff, 14, 24, 1.2);
+const heartLight = new THREE.PointLight(0xa070ff, 45, 34, 1.3); heartLight.position.set(HEART.x, 5, HEART.z);
+const poolLight = new THREE.PointLight(0x3fe0c0, 22, 26, 1.3); poolLight.position.set((POOL.x + POOL.w / 2) * T, 3, (POOL.z + POOL.h / 2) * T);
+const exitLight = new THREE.PointLight(0x9fb8ff, 30, 26, 1.3); exitLight.position.set(EXIT_X, 4, EXIT_Z + 2.5);
+const torchSlots = Array.from({ length: isTouch ? 3 : 5 }, () => ({ light: new THREE.PointLight(0xff8a3a, 0, 21, 1.4), torch: null, k: 0, want: 0 }));
+caveScene.add(cHemi, cAmb, caveSun, caveSun.target, caveAura, heartLight, poolLight, exitLight, ...torchSlots.map(s => s.light));
+// Lueur de torche devant l'entrée, dans le monde extérieur (ajoutée dès le départ, elle aussi).
+const entranceLight = new THREE.PointLight(0xff9a50, 22, 22, 1.4);
+entranceLight.position.set(CAVE.x + CAVE.nx * 3, CAVE.h + 4.5, CAVE.z + CAVE.nz * 3);
+scene.add(entranceLight);
+
+let caveBuilt = false;
+const torches = [];        // { x, y, z } : position des flammes
+const heartShards = [];    // cristaux du Cœur, animés
+let sporeMat = null, flameMat = null, extFlameMat = null, exitGlowMat = null;
+const ruinMatsOut = [];    // matériaux des ruines extérieures : teintés comme les rochers selon le jour et la nuit
+
+// Les matériaux du pack sont des couleurs unies : on les remplace par des Lambert (moins coûteux), éclaircis pour la pénombre.
+function ruinMaterial(m, cache) {
+  if (cache.has(m)) return cache.get(m);
+  const n = m.name, c = m.color.clone();
+  const out = new THREE.MeshLambertMaterial({ color: c, flatShading: true });
+  if (/Leaves|Leaf/i.test(n)) out.color.set(0x3f7d36);
+  else if (/^Fire/i.test(n)) { out.color.set(0xff8a30); out.emissive.set(0xff6a1a); out.emissiveIntensity = 2.2; }
+  else if (/^Light/i.test(n)) { out.color.set(0xffc060); out.emissive.set(0xffa040); out.emissiveIntensity = 2.2; }
+  else if (/Main|Highlights|Stone/i.test(n)) out.color.multiplyScalar(1.9);
+  else out.color.multiplyScalar(1.5);
+  cache.set(m, out);
+  return out;
+}
+// Instances d'un modèle dans la grotte, regroupées par blocs de 6 × 6 cases pour que la caméra écarte celles hors champ.
+function caveInstances(tpl, items, { cast = true, receive = true } = {}) {
+  tpl.updateMatrixWorld(true);
+  const buckets = new Map();
+  for (const it of items) { const k = Math.floor(it.x / (6 * T)) * 100 + Math.floor(it.z / (6 * T)); let b = buckets.get(k); if (!b) buckets.set(k, b = []); b.push(it); }
+  const tmp = new THREE.Matrix4();
+  tpl.traverse(o => {
+    if (!o.isMesh) return;
+    for (const list of buckets.values()) {
+      const m = new THREE.InstancedMesh(o.geometry, o.material, list.length);
+      list.forEach((it, i) => m.setMatrixAt(i, tmp.multiplyMatrices(it.m, o.matrixWorld)));
+      m.computeBoundingSphere(); m.castShadow = cast; m.receiveShadow = receive;
+      caveScene.add(m);
+    }
+  });
+}
+
+function buildCave(gltf) {
+  // Chaque scène du fichier est un modèle, nommée comme lui (les nœuds, eux, sont renommés par le chargeur).
+  const tpl = {};
+  for (const sc of gltf.scenes) tpl[sc.name] = sc;
+  const cache = new Map();
+  for (const sc of gltf.scenes) sc.traverse(o => { if (o.isMesh) o.material = ruinMaterial(o.material, cache); });
+  // Les ondes de choc du hurlement se dessinent aussi sur les dalles et les murs.
+  for (const m of cache.values()) if (!m.emissiveIntensity || m.emissiveIntensity < 1) m.onBeforeCompile = addRings;
+  const krand = mulberry32(777);
+  const kpick = l => l[Math.floor(krand() * l.length)];
+  const items = {};
+  const put = (name, x, y, z, ry = 0, s = RS, sy = s) => {
+    dummy.position.set(x, y, z); dummy.rotation.set(0, ry, 0); dummy.scale.set(s, sy, s); dummy.updateMatrix();
+    (items[name] ||= []).push({ x, z, m: dummy.matrix.clone() });
+  };
+  const floorFor = r => !r ? 'Floor_Standard' : r.name.startsWith('Salle') ? 'Floor_Squares' : r.name.startsWith('Bassin') ? 'Floor_SquareLarge'
+    : /Crypte|Cœur/.test(r.name) ? 'Floor_Diamond' : 'Floor_Standard';
+  const BACK = [['Wall', 0.55], ['Wall_Overgrown', 0.7], ['Wall_Broken', 0.78], ['Wall_Hole', 0.84], ['Window_Bars', 0.93], ['Window_Bars_Overgrown', 1]];
+  const isExit = (i, j) => j === 2 && (i === 6 || i === 7);
+  for (let j = 0; j < CGH; j++) for (let i = 0; i < CGW; i++) {
+    const c = cAt(i, j); if (!c) continue;
+    const cx = (i + 0.5) * T, cz = (j + 0.5) * T;
+    if (c === 1) put(floorFor(roomAt(i, j)), cx, 0, cz, Math.floor(krand() * 4) * Math.PI / 2);
+    else put('Floor_SquareLarge', cx, -1.3, cz);
+    // Murs du fond (nord, ouest) : pleins, parfois une torche.
+    for (const [di, dj, ex, ez, ry] of [[0, -1, cx, j * T, 0], [-1, 0, i * T, cz, Math.PI / 2]]) {
+      if (cAt(i + di, j + dj) || (di === 0 && isExit(i, j))) continue;
+      const r = krand(), name = BACK.find(b => r < b[1])[0];
+      put(name, ex, 0, ez, ry);
+      const forced = di === 0 && j === 2 && (i === 5 || i === 8);
+      if (forced || (!/Window|Hole/.test(name) && krand() < 0.28)) {
+        const nx = -di * 0.25, nz = -dj * 0.25;
+        put('Torch', ex + nx, 2.4, ez + nz, ry);
+        torches.push({ x: ex + nx * 2.2 - di * 0.15, y: 2.4 + 0.8 * RS, z: ez + nz * 2.2 - dj * 0.15 });
+      } else if (c === 1 && name === 'Wall' && krand() < 0.12) put('Flag_Wall', ex - di * 0.3, 0, ez - dj * 0.3, ry);
+    }
+    // Murs de devant (sud, est) : bas et éboulés.
+    for (const [di, dj, ex, ez, ry] of [[0, 1, cx, (j + 1) * T, Math.PI], [1, 0, (i + 1) * T, cz, -Math.PI / 2]]) {
+      if (cAt(i + di, j + dj)) continue;
+      put('Wall_Double_Broken', ex, 0, ez, ry, RS, RS * 0.8);
+    }
+  }
+  // Piliers aux jonctions de murs (ils masquent les raccords des angles).
+  const open = (i, j) => cAt(i, j) > 0;
+  const hEdge = (i, j) => open(i, j - 1) !== open(i, j) ? (open(i, j) ? 2 : 1) : 0;   // 2 = mur du fond, 1 = mur de devant
+  const vEdge = (i, j) => open(i - 1, j) !== open(i, j) ? (open(i, j) ? 2 : 1) : 0;
+  for (let vj = 0; vj <= CGH; vj++) for (let vi = 0; vi <= CGW; vi++) {
+    const L = hEdge(vi - 1, vj), Rr = hEdge(vi, vj), U = vEdge(vi, vj - 1), D = vEdge(vi, vj);
+    if (!(L || Rr || U || D)) continue;
+    if ((L && Rr && !U && !D) || (U && D && !L && !Rr)) continue;
+    const tall = Math.max(L, Rr, U, D) === 2;
+    put('Column_Square', vi * T, 0, vj * T, 0, RS, tall ? RS * 0.5 : RS * 0.2);
+    cAddObs(vi * T, vj * T, 0.8);
+  }
+  // L'arche de sortie, avec la lumière du dehors.
+  put('Wall_ArchRound_Overgrown', EXIT_X, 0, EXIT_Z, 0);
+  {
+    const cv = document.createElement('canvas'); cv.width = 4; cv.height = 64;
+    const x = cv.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 64);
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.55, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,1)');
+    x.fillStyle = g; x.fillRect(0, 0, 4, 64);
+    exitGlowMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), color: 0x9fb8ff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    const glowPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.4 * RS * 2, 3.2 * RS), exitGlowMat);
+    glowPlane.position.set(EXIT_X, 1.6 * RS, EXIT_Z - 0.7);
+    caveScene.add(glowPlane);
+  }
+  // Décor des salles. obs : rayon de collision (0 = le loup passe à travers).
+  const deco = (name, tx, tz, ry = 0, s = RS, obs = 0, sy = s) => { put(name, tx * T, 0, tz * T, ry, s, sy); if (obs) cAddObs(tx * T, tz * T, obs); };
+  const face = (tx, tz) => Math.atan2(HEART.x / T - tx, HEART.z / T - tz);
+  // Hall des Racines
+  for (const [x, z] of [[5.3, 3.6], [8.7, 3.6], [5.3, 6.2], [8.7, 6.2]]) deco('Column_Round', x, z, 0, RS, 0.8, RS * 0.55);
+  deco('Bush_Large', 4.5, 2.5, 0.4, RS * 0.9); deco('Bush_Round', 9.5, 2.6, 1.3, RS); deco('Bush_2x2', 4.4, 4.6, 1.57, RS * 0.8);
+  deco('Crate', 4.5, 6.5, 0.3, RS * 0.9, 0.9); deco('Pot1', 5.4, 6.6, 0, RS * 0.9, 0.6); deco('Bricks', 7.4, 5.6, 0.8); deco('Skull', 8.4, 5.1, 2.2, RS * 0.8);
+  // Salle des Gardiens
+  deco('Statue_Stag', 17.6, 1.9, 0, RS * 0.85, 1.5); deco('Statue_Stag', 22.4, 1.9, 0, RS * 0.85, 1.5);
+  for (const [x, z] of [[17.5, 4.6], [22.5, 4.6], [17.5, 6.8], [22.5, 6.8]]) deco('Column_Square', x, z, 0, RS, 0.8, RS * 0.5);
+  deco('Candles_1', 20, 1.5, 0); deco('Candles_2', 16.5, 7.4, 1); deco('Candles_1', 23.4, 7.3, 2);
+  deco('Pot3', 23.5, 1.5, 0, RS * 0.9, 0.5); deco('Pot2_Broken', 16.5, 1.6, 0, RS * 0.9); deco('Bricks', 19.4, 6.4, 2.1);
+  // Bassin d'Émeraude
+  for (const [x, z] of [[POOL.x, POOL.z], [POOL.x + POOL.w, POOL.z], [POOL.x, POOL.z + POOL.h], [POOL.x + POOL.w, POOL.z + POOL.h]]) deco('Column_Round_Short', x, z, 0, RS, 0.6);
+  for (let i = POOL.x; i < POOL.x + POOL.w; i++) { if (i !== 19) deco('Rail_Straight', i + 0.5, POOL.z, Math.PI / 2, RS, 0, RS); deco('Rail_Straight', i + 0.5, POOL.z + POOL.h, Math.PI / 2); }
+  for (let j = POOL.z; j < POOL.z + POOL.h; j++) { deco('Rail_Straight', POOL.x, j + 0.5, 0); deco('Rail_Straight', POOL.x + POOL.w, j + 0.5, 0); }
+  deco('Bush_Round', 15.5, 13.5, 0.3); deco('Bush_2x2', 23.4, 19.4, 0.4, RS * 0.9); deco('Bush_Large', 15.6, 19.4, 1.1, RS * 0.9); deco('Bush_Round', 23.5, 13.5, 2);
+  deco('Pot1', 16.4, 13.4, 0, RS * 0.9, 0.6); deco('Skull', 22.6, 19.5, 0.7, RS * 0.8);
+  // Crypte des Anciens
+  deco('Bookcase_Full', 4.5, 12.25, 0, RS, 1.1); deco('Bookcase_Full', 9.0, 12.25, 0, RS, 1.1); deco('Bookcase_Full', 3.25, 15.5, Math.PI / 2, RS, 1.1);
+  deco('Trapdoor', 6.5, 15, 0.2); deco('Chest', 5.5, 17.4, 0, RS, 1.0); deco('Candles_2', 4.0, 17.3, 0.5); deco('Candles_1', 9.4, 17.4, 1.5);
+  deco('Skull', 7.9, 16.9, 2.6, RS * 0.8); deco('Skull', 3.8, 13.6, 0.9, RS * 0.7); deco('Pot3', 9.5, 13.4, 0, RS * 0.9, 0.5); deco('Pot2_Broken', 8.8, 13.6, 1, RS * 0.9);
+  // Cœur de la Montagne : quatre renards de pierre veillent sur un amas de cristaux.
+  for (const [x, z] of [[28.2, 10.2], [32.8, 10.2], [28.2, 14.8], [32.8, 14.8]]) deco('Statue_Fox', x, z, face(x, z), RS * 0.75, 1.1);
+  for (let k = 0; k < 6; k++) { const a = k / 6 * 6.28 + 0.5; deco(k % 2 ? 'Candles_1' : 'Candles_2', 30.5 + Math.cos(a) * 1.25, 12.5 + Math.sin(a) * 1.25, a, RS * 0.8); }
+  cAddObs(HEART.x, HEART.z, 2.4);
+  // Réserve oubliée
+  deco('Cart', 29.6, 2.0, 0.35, RS * 0.75, 2.2); deco('Barrel', 27.6, 1.6, 0, RS * 0.9, 0.8); deco('Barrel', 28.5, 1.4, 1, RS * 0.9, 0.8);
+  deco('Crate', 31.4, 1.5, 0.2, RS * 0.9, 0.9); deco('Crate', 31.5, 4.4, 0.7, RS * 0.9, 0.9); deco('Pot1', 27.5, 4.4, 0, RS * 0.9, 0.6); deco('Pot3', 28.3, 4.5, 0, RS * 0.9, 0.5);
+  // Galeries : quelques débris.
+  deco('Bricks', 12.5, 4.6, 1.2); deco('Skull', 13.8, 5.4, 0.3, RS * 0.7); deco('Bricks', 6.6, 9.5, 2.5); deco('Pot2_Broken', 7.5, 10.6, 0.4, RS * 0.9);
+  deco('Bricks', 20.1, 10.5, 0.2); deco('Bush_Round', 11, 16.6, 0.5, RS * 0.8); deco('Bricks', 25.5, 15.4, 1.9); deco('Skull', 29.6, 7.0, 1.1, RS * 0.7);
+
+  for (const [name, list] of Object.entries(items)) {
+    if (!tpl[name]) { console.warn('Ruine absente :', name); continue; }
+    caveInstances(tpl[name], list, { cast: !/^Floor|Trapdoor/.test(name), receive: true });
+  }
+
+  // Eau du bassin, et ses bords de pierre.
+  const pw = POOL.w * T, ph = POOL.h * T, pcx = (POOL.x + POOL.w / 2) * T, pcz = (POOL.z + POOL.h / 2) * T;
+  const poolWater = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph).rotateX(-Math.PI / 2),
+    new THREE.MeshLambertMaterial({ color: 0x0d4a48, emissive: 0x1fb8a0, emissiveIntensity: 0.55, transparent: true, opacity: 0.82 }));
+  poolWater.material.onBeforeCompile = addRings;
+  poolWater.position.set(pcx, -0.35, pcz); caveScene.add(poolWater);
+  const rimSide = new THREE.MeshLambertMaterial({ color: 0x2c2d26, flatShading: true });
+  for (const [w, d, x, z] of [[pw, 0.3, pcx, POOL.z * T + 0.15], [pw, 0.3, pcx, (POOL.z + POOL.h) * T - 0.15], [0.3, ph, POOL.x * T + 0.15, pcz], [0.3, ph, (POOL.x + POOL.w) * T - 0.15, pcz]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, 1.4, d), rimSide); b.position.set(x, -0.7, z); b.receiveShadow = true; caveScene.add(b);
+  }
+
+  // Le Cœur : un amas de cristaux qui luit et tourne lentement.
+  {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xc9a2ff, toneMapped: false });
+    const mat2 = new THREE.MeshBasicMaterial({ color: 0x8ff3ff, toneMapped: false });
+    const geo = new THREE.OctahedronGeometry(1, 0);
+    const g = new THREE.Group(); g.position.set(HEART.x, 0, HEART.z);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 2.3, 0.6, 8), new THREE.MeshLambertMaterial({ color: 0x3a3646, flatShading: true }));
+    base.position.y = 0.3; base.castShadow = base.receiveShadow = true; g.add(base);
+    for (let k = 0; k < 8; k++) {
+      const a = k / 8 * 6.28, r = k === 0 ? 0 : 0.9 + krand() * 0.4, s = k === 0 ? 1.1 : 0.45 + krand() * 0.35;
+      const m = new THREE.Mesh(geo, k % 3 === 1 ? mat2 : mat);
+      m.position.set(Math.cos(a) * r, 0.6 + s * 2.2, Math.sin(a) * r);
+      m.scale.set(s, s * 3.2, s); m.rotation.set((krand() - 0.5) * 0.5, krand() * 3, (krand() - 0.5) * 0.5 + (k ? Math.cos(a) * 0.35 : 0));
+      g.add(m); heartShards.push({ m, base: m.position.y, ph: krand() * 6 });
+    }
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: 0xa070ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.scale.setScalar(11); halo.position.y = 3; g.add(halo);
+    caveScene.add(g);
+  }
+
+  // Champignons lumineux et fougères (Stylized Nature MegaKit), avec leurs propres matériaux : la grotte ne suit pas le jour.
+  if (natureTpl) {
+    const own = (name, fn) => {
+      const t = natureTpl[name]; if (!t) return null;
+      const c = t.clone(true); c.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); fn(o.material); } }); return c;
+    };
+    const mush = own('Mushroom_Common', m => { m.color.setRGB(0.75, 0.75, 0.9); m.emissive = new THREE.Color(0x3fe8ff); m.emissiveIntensity = 1.3; });
+    const fern = own('Fern_1', m => { m.color.setRGB(0.4, 0.55, 0.5); });
+    const mItems = [], fItems = [];
+    for (const [tx, tz, n] of [[15.6, 18.6, 6], [23.3, 14.4, 5], [16.2, 15.6, 4], [10.6, 4.6, 4], [4.6, 16.6, 5], [33.4, 9.6, 6], [27.6, 15.4, 5], [21, 7.4, 4], [20.4, 11.5, 3]]) {
+      for (let k = 0; k < n; k++) {
+        const x = tx * T + (krand() - 0.5) * 3, z = tz * T + (krand() - 0.5) * 3;
+        dummy.position.set(x, 0, z); dummy.rotation.set(0, krand() * 6.28, 0); dummy.scale.setScalar(0.9 + krand()); dummy.updateMatrix();
+        mItems.push({ x, z, m: dummy.matrix.clone() });
+      }
+    }
+    for (const [tx, tz] of [[16, 14], [22.8, 18.8], [4.6, 3], [9.4, 3.2], [16.2, 17.2], [22.9, 15.6], [33.3, 15.4]]) {
+      const x = tx * T, z = tz * T;
+      dummy.position.set(x, 0, z); dummy.rotation.set(0, krand() * 6.28, 0); dummy.scale.setScalar(1 + krand() * 0.5); dummy.updateMatrix();
+      fItems.push({ x, z, m: dummy.matrix.clone() });
+    }
+    if (mush) caveInstances(mush, mItems, { cast: false });
+    if (fern) caveInstances(fern, fItems, { cast: false });
+  }
+
+  // Flammes des torches : un seul nuage de points lumineux.
+  {
+    const pos = new Float32Array(torches.length * 3);
+    torches.forEach((t, i) => pos.set([t.x, t.y, t.z], i * 3));
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    flameMat = new THREE.PointsMaterial({ size: 34, sizeAttenuation: false, map: glow, color: 0xff9a40, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    const p = new THREE.Points(g, flameMat); p.frustumCulled = false; caveScene.add(p);
+  }
+  // Spores qui flottent dans les salles (animées par le GPU, comme les feux follets).
+  {
+    const n = 420, pos = new Float32Array(n * 3), ph = new Float32Array(n), col = new Float32Array(n * 3), cc = new THREE.Color();
+    for (let k = 0; k < n;) {
+      const i = Math.floor(krand() * CGW), j = Math.floor(krand() * CGH); if (!cAt(i, j)) continue;
+      pos.set([(i + krand()) * T, 0.6 + krand() * 4.5, (j + krand()) * T], k * 3); ph[k] = krand() * 100;
+      cc.setHSL(krand() < 0.6 ? 0.5 : 0.75, 1, 0.65); col.set([cc.r, cc.g, cc.b], k * 3); k++;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('phase', new THREE.BufferAttribute(ph, 1)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    sporeMat = wispMat.clone();
+    sporeMat.uniforms = { uTime: { value: 0 }, uDay: { value: 0 }, uSize: wispMat.uniforms.uSize, uMap: { value: glow } };
+    const p = new THREE.Points(g, sporeMat); p.frustumCulled = false; caveScene.add(p);
+  }
+
+  // Dehors : l'arche taillée dans la falaise, son ombre profonde, deux torches.
+  {
+    const ext = new THREE.Group(); ext.position.set(CAVE.x, CAVE.h - 0.15, CAVE.z); ext.rotation.y = CAVE.a;
+    const outCache = new Map();
+    const clone = name => { const c = new THREE.Group(); for (const ch of tpl[name].children) c.add(ch.clone(true)); c.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; let m = outCache.get(o.material); if (!m) { m = o.material.clone(); outCache.set(o.material, m); ruinMatsOut.push({ mat: m, base: m.color.clone() }); } o.material = m; } }); return c; };
+    const arch = clone('Wall_ArchRound_Overgrown'); arch.scale.setScalar(2.4); ext.add(arch);
+    const dark = new THREE.Mesh(new THREE.BoxGeometry(2.8 * 2.4, 3.3 * 2.4, 5), new THREE.MeshBasicMaterial({ color: 0x010103 }));
+    dark.position.set(0, 3.3 * 1.2 - 0.3, -2.7); ext.add(dark);
+    const inner = new THREE.Sprite(new THREE.SpriteMaterial({ map: glow, color: 0x6f8cff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }));
+    inner.position.set(0, 2.5, -0.6); inner.scale.setScalar(6); ext.add(inner);
+    const fl = [];
+    for (const s of [-1, 1]) {
+      const t = clone('Torch'); t.scale.setScalar(2.0); t.position.set(s * 4.1, 3.3, 0.25); ext.add(t);
+      fl.push(s * 4.1, 3.3 + 1.7, 0.6);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(fl), 3));
+    extFlameMat = new THREE.PointsMaterial({ size: 34, sizeAttenuation: false, map: glow, color: 0xff9a40, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+    ext.add(new THREE.Points(g, extFlameMat));
+    scene.add(ext);
+    applyAmbience(dayK);
+  }
+
+  // Envoi d'avance au GPU (shaders, instances, ombres) : la première entrée dans la grotte ne saccade pas.
+  try { renderer.compile(caveScene, camera); renderer.compile(scene, camera); } catch (e) { console.warn(e); }
+  const culled = [];
+  caveScene.traverse(o => { if (o.isInstancedMesh && o.frustumCulled) { o.frustumCulled = false; culled.push(o); } });
+  const rt = new THREE.WebGLRenderTarget(4, 4);
+  try { renderer.setRenderTarget(rt); renderer.render(caveScene, camera); } catch (e) { console.warn(e); }
+  renderer.setRenderTarget(null); rt.dispose();
+  for (const o of culled) o.frustumCulled = true;
+  caveBuilt = true;
+}
+const caveReady = Promise.all([new GLTFLoader().loadAsync('assets/ruins.glb'), natureReady])
+  .then(([gltf]) => buildCave(gltf)).catch(err => console.warn('Grotte indisponible :', err));
+
+// Lumières des torches : un petit nombre de lumières suit les torches les plus proches du loup ;
+// elles s'éteignent doucement avant de changer de torche, pour éviter tout saut de lumière.
+let torchClock = 0;
+function updateTorchLights(dt, t) {
+  if ((torchClock -= dt) <= 0) {
+    torchClock = 0.3;
+    const near = torches.map(tc => [tc, (tc.x - W.x) ** 2 + (tc.z - W.z) ** 2]).sort((a, b) => a[1] - b[1]).slice(0, torchSlots.length).map(a => a[0]);
+    for (const s of torchSlots) s.want = near.includes(s.torch) ? 1 : 0;
+    for (const tc of near) {
+      if (torchSlots.some(s => s.torch === tc)) continue;
+      const free = torchSlots.find(s => s.want === 0 && s.k < 0.03);
+      if (!free) break;
+      free.torch = tc; free.want = 1; free.light.position.set(tc.x, tc.y + 0.3, tc.z);
+    }
+  }
+  torchSlots.forEach((s, i) => {
+    s.k += (s.want - s.k) * Math.min(1, dt * 3);
+    s.light.intensity = 38 * s.k * (0.85 + 0.1 * Math.sin(t * 13 + i * 2) + 0.05 * Math.sin(t * 29 + i));
+  });
+}
+function updateCave(dt, t) {
+  updateTorchLights(dt, t);
+  if (flameMat) flameMat.opacity = 0.8 + Math.sin(t * 17) * 0.1;
+  if (sporeMat) sporeMat.uniforms.uTime.value = t;
+  for (const h of heartShards) { h.m.rotation.y += dt * 0.4; h.m.position.y = h.base + Math.sin(t * 1.3 + h.ph) * 0.12; }
+  heartLight.intensity = 40 + Math.sin(t * 1.7) * 8 + heartPulse * 120;
+  heartPulse = Math.max(0, heartPulse - dt * 0.5);
+  exitLight.color.set(isDay ? 0xffe2a8 : 0x9fb8ff);
+  if (exitGlowMat) exitGlowMat.color.copy(exitLight.color);
+  caveAura.position.set(W.x + 2, W.y + 6, W.z + 2);
+  // Retour à l'extérieur par l'arche
+  if (W.z < EXIT_Z + 1.0 && Math.abs(W.x - EXIT_X) < 3) goCave(false);
+  // Première visite du Cœur
+  if (!heartSeen && Math.hypot(W.x - HEART.x, W.z - HEART.z) < 10) {
+    heartSeen = true;
+    toast('Cœur de la Montagne', 'Les anciens loups dormaient ici. Hurle, et ils te répondront.', 5200);
+  }
+}
+let heartPulse = 0, heartSeen = false;
+// Hurler près du Cœur : les cristaux s'embrasent et un chœur de loups répond depuis la roche.
+function heartHowl() {
+  if (Math.hypot(W.x - HEART.x, W.z - HEART.z) > 14) return;
+  heartPulse = 1;
+  burst(HEART.x, 3, HEART.z, 0xc9a2ff, 160, 1.4);
+  setTimeout(() => { shockRing(HEART.x, 0, HEART.z, 0xb48cff, 30, 3); burst(HEART.x, 4, HEART.z, 0x8ff3ff, 120, 1.8); }, 600);
+  playChorus();
+}
+
+// Entrer ou sortir : fondu au noir, changement de scène, fondu retour.
+let inCave = false, warping = false;
+const fadeEl = document.getElementById('fade');
+function goCave(enter) {
+  if (warping || !caveBuilt || enter === inCave) return;
+  warping = true; fadeEl.classList.add('on');
+  setTimeout(() => {
+    inCave = enter;
+    document.body.classList.toggle('cave', enter);
+    if (enter) { W.x = ENTRY.x; W.z = ENTRY.z; W.angle = 0; caveScene.add(wolf.root); }
+    else { W.x = CAVE.x + CAVE.nx * 5.5; W.z = CAVE.z + CAVE.nz * 5.5; W.angle = CAVE.a; scene.add(wolf.root); }
+    W.y = floorH(W.x, W.z); W.vy = 0; W.ground = true;
+    renderPass.scene = enter ? caveScene : scene;
+    applyAmbience(dayK);
+    setAudioCave(enter, 1.2);
+    placeCamera(1);
+    for (const s of torchSlots) { s.k = 0; s.want = 0; s.torch = null; } torchClock = 0;
+    if (!enter) updateGrass(true);
+    zoneNow = zoneName(W.x, W.z); curZone = zoneCand = zoneNow; zoneEl.textContent = zoneNow;
+    try { renderer.compile(enter ? caveScene : scene, camera); } catch (e) { console.warn(e); }
+    setTimeout(() => { fadeEl.classList.remove('on'); warping = false; }, 120);
+    if (enter) toast('Grotte des Anciens', 'Des ruines oubliées dorment sous la montagne. L’arche lumineuse ramène dehors.', 4800);
+  }, 480);
+}
+// Dehors : le loup entre en passant sous l'arche.
+function checkCaveEntrance() {
+  const [u, v] = caveLocal(W.x, W.z);
+  if (u < 1.3 && u > -4 && Math.abs(v) < 2.6) goCave(true);
+}
+const floorH = (x, z) => inCave ? 0 : groundH(x, z);
+// Dans la grotte, les murs sont droits : on avance, sinon on glisse le long du mur sur un seul axe.
+function moveWolfCave(mx, mz) {
+  for (const [ax, az] of [[mx, mz], [mx, 0], [0, mz]]) {
+    if (!ax && !az) continue;
+    const [nx, nz] = cPushOut(W.x + ax, W.z + az, WOLF_R);
+    const ddx = nx - W.x, ddz = nz - W.z;
+    if (ddx * ax + ddz * az <= 0.2 * (ax * ax + az * az)) continue;
+    if (!caveFree(nx, nz, WOLF_R)) continue;
+    W.x = nx; W.z = nz;
+    return Math.atan2(ddx, ddz);
+  }
+  return null;
 }
 
 /* ---------- Cristaux : éclats de lune la nuit, cristaux de soleil le jour ---------- */
@@ -1213,7 +1655,7 @@ function scareAnimals() {
 }
 function updateAnimals(dt) {
   for (const a of animals) {
-    if (Math.abs(a.x - W.x) > ANIMAL_NEAR || Math.abs(a.z - W.z) > ANIMAL_NEAR) {
+    if (inCave || Math.abs(a.x - W.x) > ANIMAL_NEAR || Math.abs(a.z - W.z) > ANIMAL_NEAR) {
       a.root.visible = false;
       a.acc += dt;
       if (a.acc >= 0.5) { for (let k = 0; k < 5; k++) stepAnimal(a, a.acc / 5); a.acc = 0; a.angle = a.heading; }
@@ -1241,11 +1683,11 @@ function burst(x, y, z, color, n = 70, speed = 1) {
   }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const p = new THREE.Points(g, new THREE.PointsMaterial({ size: 10, sizeAttenuation: false, map: glow, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
-  p.frustumCulled = false; scene.add(p);
+  p.frustumCulled = false; (inCave ? caveScene : scene).add(p);
   effects.push({ life: 1.6, max: 1.6, update(dt) {
     for (let i = 0; i < n; i++) { const v = vel[i]; v[1] -= 6 * dt; pos[i * 3] += v[0] * dt; pos[i * 3 + 1] += v[1] * dt; pos[i * 3 + 2] += v[2] * dt; v[0] *= 0.97; v[2] *= 0.97; }
     g.attributes.position.needsUpdate = true; p.material.opacity = this.life / this.max;
-  }, dispose() { scene.remove(p); g.dispose(); p.material.dispose(); } });
+  }, dispose() { p.removeFromParent(); g.dispose(); p.material.dispose(); } });
 }
 let ringSlot = 0;
 const ringColor = new THREE.Color();
@@ -1259,14 +1701,17 @@ function shockRing(x, y, z, color, maxR = 14, life = 1.8) {
 }
 
 /* ---------- Audio (synthétisé) ---------- */
-let actx = null, master = null, nightBus = null, dayBus = null, muted = false;
+let actx = null, master = null, nightBus = null, dayBus = null, outBus = null, caveBus = null, muted = false;
 function initAudio() {
   if (actx) return;
   try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
   master = actx.createGain(); master.gain.value = 0.55; master.connect(actx.destination);
   // Deux ambiances qui se croisent pendant la bascule : vent et nappe grave la nuit, nappe chaude et oiseaux le jour.
-  nightBus = actx.createGain(); nightBus.gain.value = isDay ? 0 : 1; nightBus.connect(master);
-  dayBus = actx.createGain(); dayBus.gain.value = isDay ? 1 : 0; dayBus.connect(master);
+  // Le dehors passe par outBus, presque coupé dans la grotte ; la grotte a son propre bus.
+  outBus = actx.createGain(); outBus.gain.value = inCave ? 0.06 : 1; outBus.connect(master);
+  caveBus = actx.createGain(); caveBus.gain.value = inCave ? 1 : 0; caveBus.connect(master);
+  nightBus = actx.createGain(); nightBus.gain.value = isDay ? 0 : 1; nightBus.connect(outBus);
+  dayBus = actx.createGain(); dayBus.gain.value = isDay ? 1 : 0; dayBus.connect(outBus);
   const len = actx.sampleRate * 4, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
   let last = 0; for (let i = 0; i < len; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; }
   const wind = actx.createBufferSource(); wind.buffer = buf; wind.loop = true;
@@ -1287,7 +1732,40 @@ function initAudio() {
   const bf = actx.createBiquadFilter(); bf.type = 'bandpass'; bf.frequency.value = 1400; bf.Q.value = 0.6;
   const bg = actx.createGain(); bg.gain.value = 0.05;
   breeze.connect(bf).connect(bg).connect(dayBus); breeze.start();
+  // Grotte : bourdonnement sourd de la roche et grondement filtré.
+  const drone = actx.createGain(); drone.gain.value = 0.05; drone.connect(caveBus);
+  for (const f of [41.2, 61.7, 98]) { const o = actx.createOscillator(); o.type = 'sine'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 14; o.connect(drone); o.start(); }
+  const rumble = actx.createBufferSource(); rumble.buffer = buf; rumble.loop = true; rumble.playbackRate.value = 0.5;
+  const rf = actx.createBiquadFilter(); rf.type = 'lowpass'; rf.frequency.value = 220;
+  const rgn = actx.createGain(); rgn.gain.value = 0.25; rumble.connect(rf).connect(rgn).connect(caveBus); rumble.start();
   birdLoop();
+  dripLoop();
+}
+function caveVerb() {
+  if (!howlVerb) { howlVerb = makeReverb(actx); const rg = actx.createGain(); rg.gain.value = 0.8; howlVerb.connect(rg).connect(master); }
+  return howlVerb;
+}
+function setAudioCave(on, dur) {
+  if (!actx) return;
+  const t = actx.currentTime;
+  for (const [bus, v] of [[outBus, on ? 0.06 : 1], [caveBus, on ? 1 : 0]]) {
+    bus.gain.cancelScheduledValues(t); bus.gain.setValueAtTime(bus.gain.value, t); bus.gain.linearRampToValueAtTime(v, t + dur);
+  }
+}
+// Gouttes d'eau : un « plic » qui glisse vers le haut, noyé dans la réverbération.
+function drip() {
+  const t = actx.currentTime + 0.01, o = actx.createOscillator(), g = actx.createGain(), pan = actx.createStereoPanner();
+  const f = 900 + Math.random() * 1400;
+  o.type = 'sine'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 1.9, t + 0.07);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.09 + Math.random() * 0.07, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.11);
+  pan.pan.value = Math.random() * 1.6 - 0.8;
+  o.connect(g).connect(pan); pan.connect(caveBus);
+  const send = actx.createGain(); send.gain.value = 1.2; pan.connect(send).connect(caveVerb());
+  o.start(t); o.stop(t + 0.14);
+}
+function dripLoop() {
+  if (actx && !muted && inCave) drip();
+  setTimeout(dripLoop, 350 + Math.random() * 2200);
 }
 function setAudioDay(toDay, dur) {
   if (!actx) return;
@@ -1311,7 +1789,7 @@ function chirp() {
   }
 }
 function birdLoop() {
-  if (actx && !muted && dayK > 0.4) chirp();
+  if (actx && !muted && dayK > 0.4 && !inCave) chirp();
   setTimeout(birdLoop, 700 + Math.random() * 2800);
 }
 // Bascule : grondement, souffle qui monte, puis arpège (majeur vers le jour, mineur descendant vers la nuit).
@@ -1392,13 +1870,23 @@ function howlVoice(ctx, dest, verb, t, { base = 1, dur = 3.4, gain = 0.3, pan = 
 }
 function playHowl() {
   if (!actx || muted) return;
-  if (!howlVerb) { howlVerb = makeReverb(actx); const rg = actx.createGain(); rg.gain.value = 0.8; howlVerb.connect(rg).connect(master); }
+  caveVerb();
   const t = actx.currentTime + 0.02, base = 0.92 + Math.random() * 0.16;
-  howlVoice(actx, master, howlVerb, t, { base, gain: 0.34 });
-  if (Math.random() < 0.6) {
+  // Sous terre, la roche renvoie le hurlement : beaucoup plus de réverbération et un écho, pas de loup lointain.
+  howlVoice(actx, master, howlVerb, t, { base, gain: 0.34, wet: inCave ? 1.4 : 0.55 });
+  if (inCave) howlVoice(actx, master, howlVerb, t + 0.42, { base, gain: 0.08, wet: 2, pan: 0.5 });
+  else if (Math.random() < 0.6) {
     howlVoice(actx, master, howlVerb, t + 1.7 + Math.random() * 0.8,
       { base: base * (0.84 + Math.random() * 0.1), dur: 2.9, gain: 0.07, pan: Math.random() < 0.5 ? -0.75 : 0.75, wet: 1.5 });
   }
+}
+// Le chœur du Cœur de la Montagne : plusieurs loups invisibles répondent, de part et d'autre.
+function playChorus() {
+  if (!actx || muted) return;
+  caveVerb();
+  const t = actx.currentTime + 1.6;
+  [[0.8, -0.8, 0], [1.12, 0.7, 0.5], [0.94, -0.3, 1.1], [1.26, 0.35, 1.6], [0.7, 0, 2.2]].forEach(([b, pan, d]) =>
+    howlVoice(actx, master, howlVerb, t + d, { base: b, dur: 3.2, gain: 0.11, pan, wet: 1.8 }));
 }
 function playChime(high = false) {
   if (!actx || muted) return;
@@ -1530,6 +2018,8 @@ function toast(title, sub = '', ms = 3200) {
   toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms);
 }
 function zoneName(x, z) {
+  if (inCave) return caveZone(x, z);
+  if (Math.hypot(x - CAVE.x, z - CAVE.z) < 16) return 'Grotte des Anciens';
   if (Math.hypot(x, z) < 22) return 'Cercle des Pierres Anciennes';
   for (const L of LAKES) if (Math.hypot(x - L.x, z - L.z) < L.r * 1.35) return L.name;
   for (const P of PEAKS) if (Math.hypot(x - P.x, z - P.z) < P.r * 1.5) return 'Contreforts du ' + P.name;
@@ -1558,10 +2048,41 @@ function makeMapBase(day) {
   return cv;
 }
 const mapNight = makeMapBase(false), mapDay = makeMapBase(true);
+// Plan de la grotte : une case du plan = un pixel, agrandi sans lissage.
+const caveMapCv = document.createElement('canvas');
+{
+  caveMapCv.width = CGW; caveMapCv.height = CGH;
+  const x = caveMapCv.getContext('2d'), img = x.createImageData(CGW, CGH);
+  for (let j = 0; j < CGH; j++) for (let i = 0; i < CGW; i++) {
+    const c = cAt(i, j), col = c === 1 ? [96, 92, 84, 255] : c === 2 ? [40, 170, 150, 255] : [8, 8, 14, 255];
+    img.data.set(col, (j * CGW + i) * 4);
+  }
+  x.putImageData(img, 0, 0);
+}
+const MAP_VIEW_CAVE = 60;
+function drawCaveMap(t) {
+  mctx.imageSmoothingEnabled = false;
+  mctx.drawImage(caveMapCv, 0, 0, CGW * T, CGH * T);
+  mctx.imageSmoothingEnabled = true;
+  mctx.fillStyle = isDay ? 'rgba(255,226,168,0.95)' : 'rgba(159,184,255,0.95)';
+  mctx.fillRect(EXIT_X - 3, EXIT_Z - 1.2, 6, 2);
+  mctx.fillStyle = `rgba(201,162,255,${0.6 + 0.4 * Math.sin(t * 2.5)})`;
+  mctx.beginPath(); mctx.arc(HEART.x, HEART.z, 2.6, 0, 7); mctx.fill();
+}
 function drawMap(t) {
-  const S = mapCv.width, half = S / 2, scale = S / (MAP_VIEW * 2);
+  const view = inCave ? MAP_VIEW_CAVE : MAP_VIEW;
+  const S = mapCv.width, half = S / 2, scale = S / (view * 2);
   mctx.save(); mctx.clearRect(0, 0, S, S);
+  if (inCave) { mctx.fillStyle = '#05060c'; mctx.fillRect(0, 0, S, S); }
   mctx.translate(half, half); mctx.rotate(Math.PI / 4); mctx.scale(scale, scale); mctx.translate(-W.x, -W.z);
+  if (inCave) drawCaveMap(t);
+  else drawWorldMap(t);
+  const k = view / MAP_VIEW; // la flèche du loup garde la même taille à l'écran
+  mctx.translate(W.x, W.z); mctx.rotate(-W.angle); mctx.scale(k, k);
+  mctx.fillStyle = '#ffffff'; mctx.beginPath(); mctx.moveTo(0, 7); mctx.lineTo(4.5, -4.5); mctx.lineTo(0, -2); mctx.lineTo(-4.5, -4.5); mctx.closePath(); mctx.fill();
+  mctx.restore();
+}
+function drawWorldMap(t) {
   mctx.globalAlpha = 1; mctx.drawImage(mapNight, -SIZE / 2, -SIZE / 2, SIZE, SIZE);
   if (dayK > 0) { mctx.globalAlpha = dayK; mctx.drawImage(mapDay, -SIZE / 2, -SIZE / 2, SIZE, SIZE); mctx.globalAlpha = 1; }
   mctx.fillStyle = 'rgba(230,220,200,0.55)';
@@ -1570,9 +2091,9 @@ function drawMap(t) {
   for (const s of shards) if (!s.taken) { mctx.beginPath(); mctx.arc(s.x, s.z, 4.2, 0, 7); mctx.fill(); }
   mctx.strokeStyle = awakened ? (isDay ? '#ffd27a' : '#9ff6ff') : 'rgba(180,140,255,0.8)'; mctx.lineWidth = 2;
   mctx.beginPath(); mctx.arc(0, 0, CIRCLE_R, 0, 7); mctx.stroke();
-  mctx.translate(W.x, W.z); mctx.rotate(-W.angle);
-  mctx.fillStyle = '#ffffff'; mctx.beginPath(); mctx.moveTo(0, 7); mctx.lineTo(4.5, -4.5); mctx.lineTo(0, -2); mctx.lineTo(-4.5, -4.5); mctx.closePath(); mctx.fill();
-  mctx.restore();
+  // Entrée de la grotte : une petite arche sombre cerclée d'orange.
+  mctx.fillStyle = '#05050a'; mctx.strokeStyle = 'rgba(255,154,80,0.9)'; mctx.lineWidth = 1.5;
+  mctx.beginPath(); mctx.arc(CAVE.x, CAVE.z, 4, 0, 7); mctx.fill(); mctx.stroke();
 }
 
 /* ---------- Gameplay ---------- */
@@ -1625,7 +2146,8 @@ function moveWolf(mx, mz) {
 }
 function howl() {
   if (W.howl > 0) return;
-  W.howl = 2.4; playHowl(); scareAnimals();
+  W.howl = 2.4; playHowl();
+  if (inCave) heartHowl(); else scareAnimals();
   shockRing(W.x, W.y, W.z, 0x8ff3ff, 22, 2.4);
   setTimeout(() => shockRing(W.x, W.y, W.z, 0xb48cff, 16, 2.0), 400);
 }
@@ -1711,13 +2233,13 @@ function update(dt, t) {
   const ix = (keys.right ? 1 : 0) - (keys.left ? 1 : 0) + joy.x, iy = (keys.up ? 1 : 0) - (keys.down ? 1 : 0) + joy.y;
   const running = keys.run || joy.run;
   dir.set(0, 0, 0).addScaledVector(FWD, iy).addScaledVector(RIGHT, ix);
-  const moving = dir.lengthSq() > 0 && W.howl <= 0;
-  const hHere = groundH(W.x, W.z);
+  const moving = dir.lengthSq() > 0 && W.howl <= 0 && !warping;
+  const hHere = floorH(W.x, W.z);
   if (moving) {
     dir.normalize();
     let spd = running ? 14 : 8;
     if (hHere < 0 && W.ground) spd *= 0.55;
-    const heading = moveWolf(dir.x * spd * dt, dir.z * spd * dt);
+    const heading = (inCave ? moveWolfCave : moveWolf)(dir.x * spd * dt, dir.z * spd * dt);
     const target = heading ?? Math.atan2(dir.x, dir.z);
     let d = target - W.angle; d = Math.atan2(Math.sin(d), Math.cos(d));
     W.angle += d * Math.min(1, dt * 12);
@@ -1725,7 +2247,7 @@ function update(dt, t) {
   // Saut et gravité
   if (jumpQueued && W.ground && W.howl <= 0) { W.vy = 10.5; W.ground = false; playJump(); }
   jumpQueued = false;
-  const g = groundH(W.x, W.z);
+  const g = floorH(W.x, W.z);
   if (W.ground) {
     if (g < W.y - 0.6) W.ground = false; else W.y = g;
   }
@@ -1766,7 +2288,19 @@ function animateSimpleWolf(dt, t, moving, run, howlK) {
 }
 
 function updateWorld(dt, t) {
-
+  if (inCave) updateCave(dt, t);
+  else updateOutside(dt, t);
+  // Zone
+  if ((zoneCheck -= dt) <= 0) { zoneCheck = 0.25; zoneNow = zoneName(W.x, W.z); }
+  const z = zoneNow;
+  if (z !== zoneCand) { zoneCand = z; zoneT = 0; }
+  else if (z !== curZone && (zoneT += dt) > 0.6) { curZone = z; zoneEl.style.opacity = 0; setTimeout(() => { zoneEl.textContent = z; zoneEl.style.opacity = 0.85; }, 500); }
+  // Effets
+  for (let i = effects.length - 1; i >= 0; i--) { const e = effects[i]; e.life -= dt; if (e.life <= 0) { e.dispose(); effects.splice(i, 1); } else e.update(dt); }
+}
+function updateOutside(dt, t) {
+  if (caveBuilt && !warping) checkCaveEntrance();
+  if (extFlameMat) extFlameMat.opacity = 0.8 + Math.sin(t * 17) * 0.1;
   // Éclats
   for (const s of shards) {
     if (s.taken) continue;
@@ -1783,12 +2317,6 @@ function updateWorld(dt, t) {
     finalBeam.scale.set(1 + beamPulse * 5, 1, 1 + beamPulse * 5);
   } else finalBeam.material.opacity = THREE.MathUtils.lerp(finalBeam.material.opacity, awakened ? 0.12 + Math.sin(t * 2) * 0.04 : 0, 0.03);
 
-  // Zone
-  if ((zoneCheck -= dt) <= 0) { zoneCheck = 0.25; zoneNow = zoneName(W.x, W.z); }
-  const z = zoneNow;
-  if (z !== zoneCand) { zoneCand = z; zoneT = 0; }
-  else if (z !== curZone && (zoneT += dt) > 0.6) { curZone = z; zoneEl.style.opacity = 0; setTimeout(() => { zoneEl.textContent = z; zoneEl.style.opacity = 0.85; }, 500); }
-
   // Cendres
   const ap = ashGeo.attributes.position.array, hb = ASH_BOX / 2;
   for (let i = 0; i < ASH_N; i++) {
@@ -1802,9 +2330,6 @@ function updateWorld(dt, t) {
   ashGeo.attributes.position.needsUpdate = true;
   waterTex.offset.x = t * 0.01; waterTex.offset.y = Math.sin(t * 0.2) * 0.02;
   water.material.emissiveIntensity = THREE.MathUtils.lerp(AMB.night.waterEmI, AMB.day.waterEmI, dayK) + Math.sin(t * 0.8) * 0.05;
-
-  // Effets
-  for (let i = effects.length - 1; i >= 0; i--) { const e = effects[i]; e.life -= dt; if (e.life <= 0) { e.dispose(); effects.splice(i, 1); } else e.update(dt); }
 }
 
 /* ---------- Caméra & post-traitement ---------- */
@@ -1812,7 +2337,8 @@ const camTarget = new THREE.Vector3(W.x, W.y, W.z), camGoal = new THREE.Vector3(
 // Anticrénelage : le rendu passe par des cibles multi-échantillonnées (MSAA), car l'option antialias
 // du canvas ne s'applique pas au rendu en plusieurs passes. Sans MSAA (qualité basse), un filtre FXAA prend le relais.
 const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(innerWidth, innerHeight, { type: THREE.HalfFloatType, samples: 4 }));
-composer.addPass(new RenderPass(scene, camera));
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.55, 0.62);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -1850,10 +2376,16 @@ function applyAmbience(k) {
     if (role === 'mush') mat.emissiveIntensity = L(0.9, 0);
   }
   stoneMat.color.lerpColors(N.stone, D.stone, k);
+  const [rn, rd] = NATURE_TINT.rock; tintTmp.lerpColors(rn, rd, k);
+  for (const { mat, base } of ruinMatsOut) mat.color.copy(base).multiply(tintTmp);
+  entranceLight.intensity = L(22, 10);
   ashMat.color.lerpColors(N.ash, D.ash, k); ashMat.opacity = L(N.ashO, D.ashO);
   mistMat.color.lerpColors(N.mist, D.mist, k); mistMat.opacity = L(N.mistO, D.mistO);
   terrainUniforms.uDay.value = k; wispMat.uniforms.uDay.value = k;
+  // Sous terre, l'éclairage ne dépend pas de l'heure : exposition et halo propres à la grotte.
+  if (inCave) { renderer.toneMappingExposure = 1.3; bloom.strength = 0.95; bloom.threshold = 0.55; }
 }
+const tintTmp = new THREE.Color();
 function updateAmbience(dt) {
   if (!trans) return;
   trans.t += dt;
@@ -1880,9 +2412,9 @@ function applyQuality() {
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
   bloom.enabled = q.bloom > 0;
   if (q.bloom > 0 && q.bloom < 1) bloom.setSize(Math.round(innerWidth * q.pr * q.bloom), Math.round(innerHeight * q.pr * q.bloom));
-  if (moon.shadow.mapSize.x !== q.shadow) {
-    moon.shadow.mapSize.set(q.shadow, q.shadow);
-    if (moon.shadow.map) { moon.shadow.map.dispose(); moon.shadow.map = null; }
+  for (const L of shadowLights) if (L.shadow.mapSize.x !== q.shadow) {
+    L.shadow.mapSize.set(q.shadow, q.shadow);
+    if (L.shadow.map) { L.shadow.map.dispose(); L.shadow.map = null; }
   }
   wispMat.uniforms.uSize.value = 9 * q.pr;
   for (const rt of [composer.renderTarget1, composer.renderTarget2]) if (rt.samples !== q.msaa) { rt.samples = q.msaa; rt.dispose(); }
@@ -1915,6 +2447,7 @@ function placeCamera(k) {
   if (shake > 0) camera.position.add(shakeV.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake));
   camera.lookAt(camTarget);
   moon.position.copy(camTarget).add(moonOffset); moon.target.position.copy(camTarget);
+  caveSun.position.copy(camTarget).add(NIGHT_LIGHT_OFFSET); caveSun.target.position.copy(camTarget);
   aura.position.set(W.x + 2, W.y + 6, W.z + 2);
 }
 placeCamera(1);
@@ -1935,7 +2468,7 @@ function frame() {
   }
   wispMat.uniforms.uTime.value = elapsed;
   grassUniforms.uTime.value = elapsed;
-  updateGrass();
+  if (!inCave) updateGrass();
   updateAmbience(dt);
   shake = Math.max(0, shake - dt * 0.6);
   placeCamera(1 - Math.pow(0.0015, dt));
