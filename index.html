@@ -696,7 +696,7 @@ scene.add(wolf.root);
 /* ---------- Loup animé (modèle Quaternius, CC0) ---------- */
 // Le loup simplifié reste affiché tant que le modèle charge, et sert de secours s'il échoue.
 const WOLF_LEN = 3.0;
-const WALK_TS = 1.8, RUN_TS = 1.15, JUMP_TS = 0.6;
+const WALK_TS = 2.1, RUN_TS = 1.15, JUMP_TS = 0.6;
 let rig = null;
 new GLTFLoader().load('assets/wolf.gltf', gltf => {
   const model = gltf.scene;
