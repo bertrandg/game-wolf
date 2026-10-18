@@ -19,10 +19,11 @@ Sur mobile, des boutons tactiles s'affichent à l'écran.
 
 ## Technique
 
-- Un seul fichier : `index.html`, sans étape de build.
+- Le jeu tient dans `index.html` (plus le modèle du loup dans `assets/`), sans étape de build.
 - [Three.js](https://threejs.org/) 0.160.0 chargé depuis jsDelivr (bloom, fusion de géométries).
 - Monde généré procéduralement (bruit de Perlin, graine fixe) : relief, forêts, lacs, barrière de montagnes.
 - Sons synthétisés avec la Web Audio API, aucun fichier audio.
+- Loup animé (marche, galop, saut, repos) : modèle `assets/wolf.gltf` du pack *Ultimate Animated Animals* de [Quaternius](https://quaternius.com/), licence CC0. Un loup simplifié s'affiche pendant le chargement et sert de secours.
 
 ## Lancer en local
 
